@@ -4,6 +4,20 @@
 
 > 文档不会写入任何真实服务器 IP。部署和客户端配置时，请把示例里的 `<你的服务器IP或域名>` 替换成你自己的公网服务器地址。
 
+## 基于 SonoBus 改造
+
+本项目的专业音频客户端基于开源项目 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。SonoBus 已经提供成熟的跨平台实时音频能力、Standalone 桌面程序、VST3/AU/LV2 插件形态、DAW/机架加载能力和 PCM/Opus 音频传输能力。
+
+本项目没有重写 SonoBus 的音频引擎，而是在其基础上增加公网 relay 能力：
+
+- 保留 SonoBus 原有音频采集、播放、插件、抖动缓冲、PCM/Opus 传输和 UI。
+- 新增 `Use Relay` / `Relay Server` 配置。
+- 新增 `SBR1` UDP relay envelope。
+- 当客户端没有公网 IP 或 P2P 不稳定时，可把音频包发到自己的 Linux 公网服务器中继。
+- relay 服务器只转发 UDP payload，不解码、不混音、不转码、不重采样。
+
+SonoBus 是 GPL-3.0 with App Store exception 项目。分发本项目修改版客户端时，应同时提供对应源码，并保留上游版权和许可证说明。
+
 ## 核心特性
 
 - SonoBus 桌面端：Windows、macOS、Linux。

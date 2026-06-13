@@ -2,6 +2,12 @@
 
 本文档面向最终用户和部署者。所有服务器地址都使用占位示例，请用户填写自己的公网服务器 IP 或域名。
 
+## 项目来源
+
+客户端基于 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。原版 SonoBus 已经支持 Windows、macOS、Linux、Standalone、VST3、AU、LV2 和 DAW/机架加载。本项目在原版能力上增加 `Use Relay` / `Relay Server`，让没有公网 IP 的用户也可以通过自己的 Linux 公网服务器中继音频。
+
+relay 只转发音频包，不混音、不转码、不重采样。
+
 ## 1. 下载软件
 
 进入 GitHub 项目页面后：

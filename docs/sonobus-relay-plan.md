@@ -1,6 +1,8 @@
 # 基于 SonoBus 增加公网中继的改造路线
 
-SonoBus 是 GPL-3.0 项目，带 App Store 分发例外。若直接 fork 和分发修改版，需要遵守 GPL-3.0，向用户提供对应源码。本仓库当前没有复制 SonoBus 源码，只提供独立中继服务和改造路线。
+本项目基于开源项目 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。SonoBus 是 GPL-3.0 项目，带 App Store 分发例外。若 fork 和分发修改版，需要遵守 GPL-3.0，向用户提供对应源码，并保留上游版权和许可证说明。
+
+本仓库已经包含 `sonobus/` fork，并在 SonoBus 的网络层增加公网 UDP relay 支持。独立 Node.js 服务端负责 relay 转发和部署。
 
 ## SonoBus 当前网络形态
 

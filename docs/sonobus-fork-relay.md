@@ -4,6 +4,13 @@
 
 本文档只使用占位地址。不要把真实公网 IP 写进源码、README、截图或公开 Issue。
 
+## 上游项目
+
+- 上游仓库：[sonosaurus/sonobus](https://github.com/sonosaurus/sonobus)
+- 上游能力：跨平台实时音频、Standalone、VST3、AU、LV2、DAW/机架加载、PCM/Opus 音频传输。
+- 本项目定位：SonoBus 改造版，不是从零实现的替代品。
+- 改造目标：在保留 SonoBus 原有音频能力的基础上，为无公网 IP / NAT 环境增加公网 UDP relay。
+
 ## 改动点
 
 - 在 `SonobusPluginProcessor` 中增加 relay server 配置。
