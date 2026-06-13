@@ -322,6 +322,8 @@ public:
     bool getRelayServerEnabled() const { return mRelayServerEnabled; }
     String getRelayServerHost() const { return mRelayServerHost; }
     int getRelayServerPort() const { return mRelayServerPort; }
+    void updateRelayHeartbeat();
+    void sendRelayHeartbeat();
 
     // peer stuff
     
@@ -1148,6 +1150,19 @@ private:
     };
 
     ServerReconnectTimer mReconnectTimer;
+
+    class RelayHeartbeatTimer : public Timer
+    {
+    public:
+        RelayHeartbeatTimer(SonobusAudioProcessor & proc) : processor(proc) {
+        }
+
+        void timerCallback() override;
+
+        SonobusAudioProcessor & processor;
+    };
+
+    RelayHeartbeatTimer mRelayHeartbeatTimer;
     
     CriticalSection  mRemotesLock;
 

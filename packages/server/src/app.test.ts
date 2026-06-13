@@ -83,6 +83,32 @@ test("server relays an audio frame byte-for-byte between NAT-style outbound clie
   }
 });
 
+test("admin web page is served for browser-based remote administration", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/admin`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    const html = await response.text();
+    assert.match(html, /服务器管理/);
+    assert.match(html, /\/admin\/connections/);
+    assert.match(html, /\/admin\/bans/);
+  } finally {
+    await app.close();
+  }
+});
+
 test("udp relay forwards wrapped SonoBus-style payloads without changing payload bytes", async () => {
   const app = await createApp({
     jwtSecret: "test-secret",
@@ -202,6 +228,107 @@ test("udp relay forwards native SonoBus SBR1 packets to learned group peers", as
   }
 });
 
+test("admin can list, kick, and ban native SonoBus UDP peers", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const aliceSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "kick-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await bindUdp(aliceSocket);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const listed = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.ok(listed.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"));
+
+    const kickResult = await post<{ kicked: number }>(baseUrl, "/admin/connections/kick", adminToken, {
+      type: "sonobus-udp",
+      group: "band",
+      user: "alice"
+    });
+    assert.equal(kickResult.kicked, 1);
+
+    const afterKick = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(afterKick.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), false);
+
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const afterKickRetry = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(
+      afterKickRetry.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"),
+      true
+    );
+
+    await post(baseUrl, "/admin/bans", adminToken, {
+      type: "sonobus-udp",
+      group: "band",
+      user: "alice",
+      ttlSeconds: 60
+    });
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const afterBan = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(afterBan.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), false);
+
+    const bans = await get<{ bans: Array<{ id: string; type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/bans",
+      adminToken
+    );
+    const aliceBan = bans.bans.find((ban) => ban.type === "sonobus-udp" && ban.group === "band" && ban.user === "alice");
+    assert.ok(aliceBan);
+
+    const unbanResult = await post<{ removed: number }>(baseUrl, "/admin/bans/remove", adminToken, { id: aliceBan.id });
+    assert.equal(unbanResult.removed, 1);
+
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const afterUnban = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(afterUnban.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), true);
+  } finally {
+    aliceSocket.close();
+    await app.close();
+  }
+});
+
 async function login(baseUrl: string, username: string, password: string): Promise<string> {
   const response = await fetch(`${baseUrl}/auth/login`, {
     method: "POST",
@@ -211,6 +338,16 @@ async function login(baseUrl: string, username: string, password: string): Promi
   assert.equal(response.status, 200);
   const body = (await response.json()) as { token: string };
   return body.token;
+}
+
+async function get<T = unknown>(baseUrl: string, path: string, token: string): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`
+    }
+  });
+  assert.ok(response.status >= 200 && response.status < 300, `${path} failed with ${response.status}`);
+  return (await response.json()) as T;
 }
 
 async function post<T = unknown>(baseUrl: string, path: string, token: string, body: unknown): Promise<T> {

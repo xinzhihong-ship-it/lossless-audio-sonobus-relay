@@ -108,5 +108,6 @@ docker compose up -d --build
 
 - [下载和客户端使用](docs/download-and-use.md)
 - [Linux 服务器部署](docs/deployment.md)
+- [Linux 服务器管理：查看在线用户、踢出、封禁](docs/linux-admin.md)
 - [SonoBus relay 改造说明](docs/sonobus-fork-relay.md)
 - [中继改造路线](docs/sonobus-relay-plan.md)

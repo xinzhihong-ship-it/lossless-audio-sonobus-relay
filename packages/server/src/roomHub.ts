@@ -10,6 +10,23 @@ type Client = {
   format?: AudioFormat;
   bytesInWindow: number;
   windowStartedAt: number;
+  joinedAt: string;
+};
+
+export type WebSocketConnection = {
+  type: "websocket";
+  roomId: string;
+  userId: string;
+  username: string;
+  streamId?: string;
+  format?: AudioFormat;
+  joinedAt: string;
+};
+
+export type WebSocketKickRequest = {
+  roomId?: string;
+  userId?: string;
+  username?: string;
 };
 
 type HubOptions = {
@@ -39,7 +56,8 @@ export class RoomHub {
       username,
       socket,
       bytesInWindow: 0,
-      windowStartedAt: Date.now()
+      windowStartedAt: Date.now(),
+      joinedAt: new Date().toISOString()
     };
     room.set(userId, client);
 
@@ -67,6 +85,44 @@ export class RoomHub {
 
   members(roomId: string): RoomMember[] {
     return [...(this.clientsByRoom.get(roomId)?.values() ?? [])].map((client) => this.member(client));
+  }
+
+  connections(): WebSocketConnection[] {
+    return [...this.clientsByRoom.values()].flatMap((room) =>
+      [...room.values()].map((client) => ({
+        type: "websocket" as const,
+        roomId: client.roomId,
+        userId: client.userId,
+        username: client.username,
+        streamId: client.streamId,
+        format: client.format,
+        joinedAt: client.joinedAt
+      }))
+    );
+  }
+
+  kick(request: WebSocketKickRequest): number {
+    let kicked = 0;
+    for (const room of this.clientsByRoom.values()) {
+      for (const client of room.values()) {
+        if (request.roomId && request.roomId !== client.roomId) {
+          continue;
+        }
+        if (request.userId && request.userId !== client.userId) {
+          continue;
+        }
+        if (request.username && request.username !== client.username) {
+          continue;
+        }
+        if (!request.roomId && !request.userId && !request.username) {
+          continue;
+        }
+        client.socket.close(4003, "Kicked by server admin.");
+        this.leave(client.roomId, client.userId);
+        kicked += 1;
+      }
+    }
+    return kicked;
   }
 
   leave(roomId: string, userId: string): void {

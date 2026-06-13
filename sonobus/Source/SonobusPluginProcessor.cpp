@@ -687,6 +687,7 @@ SonobusAudioProcessor::BusesProperties SonobusAudioProcessor::getDefaultLayout()
 SonobusAudioProcessor::SonobusAudioProcessor()
 : AudioProcessor ( getDefaultLayout() ),
 mReconnectTimer(*this),
+mRelayHeartbeatTimer(*this),
 soundboardChannelProcessor(std::make_unique<SoundboardChannelProcessor>()),
 mGlobalState("SonobusGlobalState"),
 mState (*this, &mUndoManager, "SonoBusAoO",
@@ -942,6 +943,7 @@ mState (*this, &mUndoManager, "SonoBusAoO",
 
 SonobusAudioProcessor::~SonobusAudioProcessor()
 {
+    mRelayHeartbeatTimer.stopTimer();
     mTransportSource.setSource(nullptr);
     mTransportSource.removeChangeListener(this);
 
@@ -1217,6 +1219,45 @@ void SonobusAudioProcessor::setRelayServer(const String & host, int port, bool e
     mRelayServerHost = host.trim();
     mRelayServerPort = port;
     mRelayServerEnabled = enabled && mRelayServerHost.isNotEmpty() && mRelayServerPort > 0;
+    updateRelayHeartbeat();
+}
+
+void SonobusAudioProcessor::updateRelayHeartbeat()
+{
+    const bool shouldRun = mRelayServerEnabled
+        && mRelayServerHost.isNotEmpty()
+        && mRelayServerPort > 0
+        && mIsConnectedToServer
+        && mCurrentJoinedGroup.isNotEmpty()
+        && mCurrentUsername.isNotEmpty()
+        && mUdpSocket != nullptr;
+
+    if (shouldRun) {
+        sendRelayHeartbeat();
+        if (!mRelayHeartbeatTimer.isTimerRunning()) {
+            mRelayHeartbeatTimer.startTimer(5000);
+        }
+    }
+    else {
+        mRelayHeartbeatTimer.stopTimer();
+    }
+}
+
+void SonobusAudioProcessor::sendRelayHeartbeat()
+{
+    if (!mRelayServerEnabled || mRelayServerHost.isEmpty() || mRelayServerPort <= 0 || mCurrentJoinedGroup.isEmpty() || mCurrentUsername.isEmpty() || !mUdpSocket) {
+        return;
+    }
+
+    EndpointState endpoint(mRelayServerHost, mRelayServerPort);
+    endpoint.owner = mUdpSocket.get();
+    endpoint.peer = std::make_unique<DatagramSocket::RemoteAddrInfo>(mRelayServerHost, mRelayServerPort);
+    endpoint.relayed = true;
+    endpoint.relaySourceName = mCurrentUsername;
+    endpoint.relayGroupName = mCurrentJoinedGroup;
+
+    auto registerPacket = makeSonoBusRelayPacket(endpoint, "", 0, 0);
+    endpoint.owner->write(*(endpoint.peer), static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
 }
 
 
@@ -1269,6 +1310,7 @@ bool SonobusAudioProcessor::disconnectFromServer()
 
         mCurrentJoinedGroup.clear();
     }
+    updateRelayHeartbeat();
 
     {
         const ScopedLock sl (mPublicGroupsLock);
@@ -4325,6 +4367,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                 mIsConnectedToServer = false;
                 mSessionConnectionStamp = 0.0;
             }
+            updateRelayHeartbeat();
 
             if (mPendingReconnect) {
                 
@@ -4383,6 +4426,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                 mCurrentJoinedGroup = CharPointer_UTF8 (e->name);
 
                 mSessionConnectionStamp = Time::getMillisecondCounterHiRes();
+                updateRelayHeartbeat();
 
 
             } else {
@@ -4400,6 +4444,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
 
                 const ScopedLock sl (mClientLock);        
                 mCurrentJoinedGroup.clear();
+                updateRelayHeartbeat();
 
                 // assume they are all part of the group, XXX
                 removeAllRemotePeers();
@@ -9001,6 +9046,11 @@ void SonobusAudioProcessor::ServerReconnectTimer::timerCallback()
 
         stopTimer();
     }
+}
+
+void SonobusAudioProcessor::RelayHeartbeatTimer::timerCallback()
+{
+    processor.sendRelayHeartbeat();
 }
 
 bool SonobusAudioProcessor::reconnectToMostRecent()
