@@ -11,3 +11,4 @@ sonobus/build32/
 sonobus/buildXcode/
 sonobus/**/*.pdb
 windows-build/
+windows-build-asio/
