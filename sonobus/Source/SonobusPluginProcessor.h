@@ -662,6 +662,7 @@ public:
     
     // IP block list
     bool isAddressBlocked(const String & ipaddr) const;
+    bool isEndpointBlocked(const EndpointState * endpoint) const;
     void addBlockedAddress(const String & ipaddr);
     void removeBlockedAddress(const String & ipaddr);
     StringArray getAllBlockedAddresses() const;

@@ -277,7 +277,7 @@ static MemoryBlock makeSonoBusRelayPacket(const SonobusAudioProcessor::EndpointS
     return packet;
 }
 
-static bool parseSonoBusRelayPacket(const char *packet, int32_t packetSize, String& source, MemoryBlock& payload)
+static bool parseSonoBusRelayPacket(const char *packet, int32_t packetSize, String& group, String& source, MemoryBlock& payload)
 {
     if (packetSize < SONOBUS_RELAY_HEADER_BYTES || memcmp(packet, SONOBUS_RELAY_MAGIC, 4) != 0 || packet[4] != 1) {
         return false;
@@ -299,8 +299,9 @@ static bool parseSonoBusRelayPacket(const char *packet, int32_t packetSize, Stri
         return false;
     }
 
+    group = parsed.getProperty("group", "").toString();
     source = parsed.getProperty("source", "").toString();
-    if (source.isEmpty()) {
+    if (group.isEmpty() || source.isEmpty()) {
         return false;
     }
 
@@ -2377,7 +2378,7 @@ SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEn
     EndpointState * endpoint = nullptr;
 
     for (auto ep : mEndpoints) {
-        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->directIpaddr == directHost && ep->directPort == directPort && ep->relayPeerName == username) {
+        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->relayGroupName == mCurrentJoinedGroup && ep->relayPeerName == username) {
             endpoint = ep;
             break;
         }
@@ -2397,6 +2398,9 @@ SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEn
 
         auto registerPacket = makeSonoBusRelayPacket(*endpoint, "", 0, 0);
         endpoint->owner->write(*(endpoint->peer), static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
+    } else if (endpoint->directIpaddr.isEmpty() && directHost.isNotEmpty()) {
+        endpoint->directIpaddr = directHost;
+        endpoint->directPort = directPort;
     }
     return endpoint;
 }
@@ -2449,13 +2453,16 @@ void SonobusAudioProcessor::doReceiveData()
     
     EndpointState * endpoint = nullptr;
     MemoryBlock relayPayload;
+    String relayGroup;
     String relaySource;
-    if (parseSonoBusRelayPacket(buf, nbytes, relaySource, relayPayload)) {
-        const ScopedLock sl (mEndpointsLock);
-        for (auto ep : mEndpoints) {
-            if (ep->relayed && ep->relayPeerName == relaySource) {
-                endpoint = ep;
-                break;
+    if (parseSonoBusRelayPacket(buf, nbytes, relayGroup, relaySource, relayPayload)) {
+        {
+            const ScopedLock sl (mEndpointsLock);
+            for (auto ep : mEndpoints) {
+                if (ep->relayed && ep->relayGroupName == relayGroup && ep->relayPeerName == relaySource) {
+                    endpoint = ep;
+                    break;
+                }
             }
         }
         if (!endpoint || !endpoint->relayed) {
@@ -2896,7 +2903,7 @@ bool SonobusAudioProcessor::handleOtherMessage(EndpointState * endpoint, const c
 
             SBChatEvent chatevent(SBChatEvent::UserType, group, from, targets, tags, message);
             
-            if (!isAddressBlocked(endpoint->ipaddr)) {
+            if (!isEndpointBlocked(endpoint)) {
                 
                 mAllChatEvents.add(chatevent);
                 clientListeners.call(&SonobusAudioProcessor::ClientListener::sbChatEventReceived, this, chatevent);
@@ -2907,7 +2914,7 @@ bool SonobusAudioProcessor::handleOtherMessage(EndpointState * endpoint, const c
             // received from the other side
             // args: none
 
-            if (!isAddressBlocked(endpoint->ipaddr)) {
+            if (!isEndpointBlocked(endpoint)) {
 
                 
                 auto latinfo = getAllLatInfo();
@@ -2969,7 +2976,7 @@ bool SonobusAudioProcessor::handleOtherMessage(EndpointState * endpoint, const c
             auto username = String(CharPointer_UTF8((it++)->AsString()));
             auto latency = (it++)->AsFloat();
 
-            if (!isAddressBlocked(endpoint->ipaddr)) {
+            if (!isEndpointBlocked(endpoint)) {
                 clientListeners.call(&SonobusAudioProcessor::ClientListener::peerRequestedLatencyMatch, this, username, latency);
             }
         }
@@ -2989,7 +2996,7 @@ bool SonobusAudioProcessor::handleOtherMessage(EndpointState * endpoint, const c
                 juce::var infodata;
                 auto result = juce::JSON::parse(jsonstr, infodata);
 
-                if (!isAddressBlocked(endpoint->ipaddr) && infodata.isObject()) {
+                if (!isEndpointBlocked(endpoint) && infodata.isObject()) {
                     auto username = infodata.getProperty("user", "");
                     auto newgroup = infodata.getProperty("group", "");
                     auto grouppass = infodata.getProperty("group_pass", "");
@@ -4499,6 +4506,17 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
             
             if (e->result > 0){
                 DBG("Peer attempting to join group " <<  e->group << " - user " << e->user);
+
+                if (mRelayServerEnabled && mAutoconnectGroupPeers) {
+                    EndpointState * endpoint = findOrAddRelayedEndpoint(mRelayServerHost, mRelayServerPort, "", 0, CharPointer_UTF8 (e->user));
+                    if (endpoint) {
+                        if (isEndpointBlocked(endpoint)) {
+                            clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoinBlocked, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user), endpoint->ipaddr, endpoint->port);
+                        } else {
+                            connectRemotePeerEndpoint(endpoint, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
+                        }
+                    }
+                }
                 
                 clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerPendingJoin, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user));
                 
@@ -4522,7 +4540,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                 if (endpoint) {
                  
                     // check if blocked
-                    if (isAddressBlocked(endpoint->ipaddr)) {
+                    if (isEndpointBlocked(endpoint)) {
                         
                         clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoinBlocked, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user), endpoint->ipaddr, endpoint->port);
 
@@ -4532,12 +4550,8 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                         });
                     }
                     else {
-                        if (mAutoconnectGroupPeers) {
-                            if (mRelayServerEnabled) {
-                                connectRemotePeerEndpoint(endpoint, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
-                            } else {
-                                connectRemotePeerRaw(e->address, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
-                            }
+                        if (mAutoconnectGroupPeers && !mRelayServerEnabled) {
+                            connectRemotePeerRaw(e->address, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
                         }
                         
                         //aoo_node_add_peer(x->x_node, gensym(e->group), gensym(e->user),
@@ -9253,6 +9267,17 @@ bool SonobusAudioProcessor::isAddressBlocked(const String & ipaddr) const
     }
     
     return false;
+}
+
+bool SonobusAudioProcessor::isEndpointBlocked(const EndpointState * endpoint) const
+{
+    if (!endpoint) {
+        return false;
+    }
+    if (endpoint->relayed) {
+        return endpoint->directIpaddr.isNotEmpty() && isAddressBlocked(endpoint->directIpaddr);
+    }
+    return isAddressBlocked(endpoint->ipaddr);
 }
 
 void SonobusAudioProcessor::addBlockedAddress(const String & ipaddr)
