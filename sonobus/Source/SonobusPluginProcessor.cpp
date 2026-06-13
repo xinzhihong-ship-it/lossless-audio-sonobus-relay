@@ -2377,7 +2377,7 @@ SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEn
     EndpointState * endpoint = nullptr;
 
     for (auto ep : mEndpoints) {
-        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->directIpaddr == directHost && ep->directPort == directPort) {
+        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->directIpaddr == directHost && ep->directPort == directPort && ep->relayPeerName == username) {
             endpoint = ep;
             break;
         }
@@ -2447,8 +2447,7 @@ void SonobusAudioProcessor::doReceiveData()
         return;
     }
     
-    // find endpoint from sender info
-    EndpointState * endpoint = findOrAddEndpoint(senderIP, senderPort);
+    EndpointState * endpoint = nullptr;
     MemoryBlock relayPayload;
     String relaySource;
     if (parseSonoBusRelayPacket(buf, nbytes, relaySource, relayPayload)) {
@@ -2468,6 +2467,10 @@ void SonobusAudioProcessor::doReceiveData()
         }
         nbytes = (int)relayPayload.getSize();
         memcpy(buf, relayPayload.getData(), relayPayload.getSize());
+    }
+    else {
+        // find endpoint from sender info
+        endpoint = findOrAddEndpoint(senderIP, senderPort);
     }
     
     endpoint->recvBytes += nbytes + UDP_OVERHEAD_BYTES;
