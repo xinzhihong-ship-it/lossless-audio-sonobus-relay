@@ -5,6 +5,34 @@ import dgram from "node:dgram";
 import WebSocket from "ws";
 import { decodeRelayPacket, encodeAudioFrame, encodeRelayPacket } from "@lossless-audio/protocol";
 import { createApp } from "./app.js";
+import { MemoryStore } from "./store.js";
+
+test("ensureAdmin updates an existing admin password from config", async () => {
+  const store = new MemoryStore();
+  await store.init();
+  await store.createUser("admin", "old-pass", "user");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "new-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    store
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    await login(baseUrl, "admin", "new-pass");
+    await assert.rejects(() => login(baseUrl, "admin", "old-pass"));
+    assert.equal((await store.getUserByUsername("admin"))?.role, "admin");
+  } finally {
+    await app.close();
+  }
+});
 
 test("server relays an audio frame byte-for-byte between NAT-style outbound clients", async () => {
   const app = await createApp({

@@ -216,6 +216,32 @@ Enter
 Ctrl + X
 ```
 
+### 这些账号密码分别管什么
+
+`.env` 里的账号密码只用于服务器 HTTP/API：
+
+| 配置 | 作用 |
+| --- | --- |
+| `ADMIN_USERNAME` | 服务器管理员登录用户名 |
+| `ADMIN_PASSWORD` | 服务器管理员登录密码 |
+| `POSTGRES_PASSWORD` | 数据库内部密码，不是用户登录密码 |
+| `JWT_SECRET` | 登录 token 签名密钥，不是用户登录密码 |
+
+注意：
+
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 不会自动变成 SonoBus 的 Group Password。
+- SonoBus 的 `Group Password` 是 SonoBus 房间密码，在 SonoBus 客户端连接页面里单独填写。
+- SonoBus 的 `Relay Server` 目前只用来转发 UDP 音频包，不会校验 `ADMIN_PASSWORD`。
+- 修改 `.env` 里的 `ADMIN_PASSWORD` 后，需要重启服务才会生效。
+
+重启命令：
+
+```bash
+docker compose up -d --build
+```
+
+新版服务启动时会同步 `.env` 里的管理员密码。如果数据库里已经存在同名管理员，也会把密码更新成 `.env` 当前值。
+
 ## 7. 启动服务
 
 在 `/opt/lossless-audio/deploy` 目录执行：

@@ -70,6 +70,11 @@ SonoBus 里有两个容易混淆的地址：
 - `Connection Server`：SonoBus 用来找同组用户的连接服务器，可继续使用默认值。
 - `Relay Server`：本项目新增的公网 UDP 中继服务器，填你自己的 Linux 公网服务器地址和 UDP 端口。
 
+还有两个容易混淆的密码：
+
+- `.env` 里的 `ADMIN_PASSWORD`：服务器 HTTP/API 管理员密码，不是 SonoBus 房间密码。
+- SonoBus 里的 `Group Password`：SonoBus group 的可选房间密码，在客户端连接页面单独设置。
+
 ## 当前边界
 
 - relay 转发音频包，不做混音、不做转码、不做重采样。

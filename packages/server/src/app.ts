@@ -13,6 +13,7 @@ export type ServerConfig = {
   databaseUrl?: string;
   maxBytesPerSecondPerClient: number;
   udpRelayPort?: number;
+  store?: Store;
 };
 
 export type App = {
@@ -22,7 +23,7 @@ export type App = {
 };
 
 export async function createApp(config: ServerConfig): Promise<App> {
-  const store = config.databaseUrl ? new PostgresStore(config.databaseUrl) : new MemoryStore();
+  const store = config.store ?? (config.databaseUrl ? new PostgresStore(config.databaseUrl) : new MemoryStore());
   await store.init();
   await ensureAdmin(store, config.adminUsername, config.adminPassword);
 
@@ -187,6 +188,11 @@ async function ensureAdmin(store: Store, username: string, password: string): Pr
   const existing = await store.getUserByUsername(username);
   if (!existing) {
     await store.createUser(username, password, "admin");
+    return;
+  }
+
+  if (existing.role !== "admin" || !verifyPassword(password, existing.passwordHash)) {
+    await store.updateUserCredentials(username, password, "admin");
   }
 }
 

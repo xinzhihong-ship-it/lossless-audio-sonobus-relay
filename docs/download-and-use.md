@@ -118,6 +118,8 @@ LV2:  ~/.lv2/
 
 客户端没有公网 IP、不能端口映射、公司/家庭 NAT 较复杂时，启用 relay。
 
+注意：服务器 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是给 HTTP/API 管理用的，不是 SonoBus 的登录密码。SonoBus 客户端连接时主要填写 `Group Name`、自己的用户名、可选的 `Group Password`，以及本项目新增的 `Relay Server`。
+
 在 SonoBus 连接页面：
 
 1. 填写 Group Name。

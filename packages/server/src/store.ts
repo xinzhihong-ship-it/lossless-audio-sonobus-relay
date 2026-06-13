@@ -22,6 +22,7 @@ export interface Store {
   getUserByUsername(username: string): Promise<UserRecord | undefined>;
   getUserById(id: string): Promise<UserRecord | undefined>;
   createUser(username: string, password: string, role: "admin" | "user"): Promise<UserRecord>;
+  updateUserCredentials(username: string, password: string, role: "admin" | "user"): Promise<UserRecord>;
   listRooms(): Promise<RoomRecord[]>;
   createRoom(name: string, createdBy: string): Promise<RoomRecord>;
   getRoom(id: string): Promise<RoomRecord | undefined>;
@@ -55,6 +56,20 @@ export class MemoryStore implements Store {
     };
     this.users.set(user.id, user);
     return user;
+  }
+
+  async updateUserCredentials(username: string, password: string, role: "admin" | "user"): Promise<UserRecord> {
+    const existing = await this.getUserByUsername(username);
+    if (!existing) {
+      throw new Error("User not found.");
+    }
+    const updated: UserRecord = {
+      ...existing,
+      passwordHash: hashPassword(password),
+      role
+    };
+    this.users.set(updated.id, updated);
+    return updated;
   }
 
   async listRooms(): Promise<RoomRecord[]> {
@@ -122,6 +137,18 @@ export class PostgresStore implements Store {
       "insert into users (id, username, password_hash, role) values ($1, $2, $3, $4) returning *",
       [id, username, passwordHash, role]
     );
+    return mapUser(result.rows[0]);
+  }
+
+  async updateUserCredentials(username: string, password: string, role: "admin" | "user"): Promise<UserRecord> {
+    const passwordHash = hashPassword(password);
+    const result = await this.pool.query(
+      "update users set password_hash = $1, role = $2 where username = $3 returning *",
+      [passwordHash, role, username]
+    );
+    if (!result.rows[0]) {
+      throw new Error("User not found.");
+    }
     return mapUser(result.rows[0]);
   }
 
