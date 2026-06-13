@@ -2,6 +2,8 @@
 
 本仓库的 `sonobus/` 目录是基于 SonoBus 上游源码的改造版本。SonoBus 自身已经支持 Standalone、AU/VST 等形态，适合 DAW/机架加载；本次改造只动网络中继层。
 
+本文档只使用占位地址。不要把真实公网 IP 写进源码、README、截图或公开 Issue。
+
 ## 改动点
 
 - 在 `SonobusPluginProcessor` 中增加 relay server 配置。
@@ -20,16 +22,54 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-启动改造版 SonoBus Standalone 时增加：
+启动改造版 SonoBus Standalone 时增加 relay 参数。通常不需要设置 `--connectionserver`，可以继续使用 SonoBus 默认连接服务器：
 
 ```bash
-SonoBus --connectionserver your-server.example.com:10998 \
-  --group test-room \
+SonoBus --group test-room \
   --username alice \
-  --relay-server your-server.example.com:9000
+  --relay-server <你的服务器IP或域名>:9000
 ```
 
 另一端使用同一个 `--group` 和同一个 `--relay-server`，用户名不同即可。
+
+如果你自己另外部署了 SonoBus/AOO connection server，才需要额外设置：
+
+```bash
+SonoBus --connectionserver <你的连接服务器域名>:10998 \
+  --group test-room \
+  --username alice \
+  --relay-server <你的relay服务器IP或域名>:9000
+```
+
+## 图形界面使用
+
+在连接页面：
+
+1. 填写 `Group Name`。
+2. 填写 `Your Displayed Name`。
+3. `Connection Server` 可以继续使用默认值。
+4. 勾选 `Use Relay`。
+5. `Relay Server` 填：
+
+```text
+<你的服务器IP或域名>:9000
+```
+
+示例：
+
+```text
+your-server.example.com:9000
+203.0.113.10:9000
+```
+
+`203.0.113.10` 是文档示例 IP，不是实际服务器。
+
+## Connection Server 和 Relay Server 的区别
+
+- `Connection Server`：SonoBus 用它让同一个 group 的用户互相发现。默认连接服务器可以继续使用。
+- `Relay Server`：本项目新增的公网 UDP 中继。没有公网 IP、NAT 无法直连时，音频包通过这里转发。
+
+不要把 relay server 写成某个固定公网 IP；分发给用户时让用户填写自己的服务器。
 
 ## 注意
 
