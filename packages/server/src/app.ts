@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import { signToken, verifyPassword, verifyToken, type TokenClaims } from "./auth.js";
 import { HttpConnectionServerAdmin, type ConnectionServerAdmin } from "./connectionServerAdmin.js";
 import { RoomHub } from "./roomHub.js";
-import { MemoryStore, PostgresStore, type Store } from "./store.js";
+import { MemoryStore, PostgresStore, type BanRecord, type BanType, type Store } from "./store.js";
 import { UdpRelay } from "./udpRelay.js";
 
 export type ServerConfig = {
@@ -34,6 +34,7 @@ export async function createApp(config: ServerConfig): Promise<App> {
   const udpRelay = config.udpRelayPort === undefined ? undefined : new UdpRelay(config.udpRelayPort);
   const connectionServer = config.connectionServer ?? (config.connectionServerAdminUrl ? new HttpConnectionServerAdmin(config.connectionServerAdminUrl) : undefined);
   await udpRelay?.start();
+  await restorePersistentBans(store, udpRelay, connectionServer);
   const server = http.createServer((req, res) => {
     handleHttp(req, res, store, config, hub, udpRelay, connectionServer).catch((error) => {
       sendJson(res, 500, { error: error instanceof Error ? error.message : "Internal server error." });
@@ -209,14 +210,18 @@ async function handleHttp(
         sendJson(res, 503, { error: "SonoBus connection server admin is disabled." });
         return;
       }
-      sendJson(res, 200, await connectionServer.ban(toConnectionBan(body)));
+      const result = await connectionServer.ban(toConnectionBan(body));
+      const ban = await store.createBan(toStoredBan(body, result.expiresAt));
+      sendJson(res, 200, { banned: result.banned, expiresAt: ban.expiresAt });
       return;
     }
     if (!udpRelay) {
       sendJson(res, 503, { error: "UDP relay is disabled." });
       return;
     }
-    sendJson(res, 200, udpRelay.ban(toUdpBan(body)));
+    const result = udpRelay.ban(toUdpBan(body));
+    const ban = await store.createBan(toStoredBan(body, result.expiresAt));
+    sendJson(res, 200, { banned: result.banned, expiresAt: ban.expiresAt });
     return;
   }
 
@@ -229,7 +234,7 @@ async function handleHttp(
       sendJson(res, 503, { error: "UDP relay is disabled." });
       return;
     }
-    sendJson(res, 200, { bans: [...(udpRelay?.listBans() ?? []), ...((await connectionServer?.listBans()) ?? [])] });
+    sendJson(res, 200, { bans: await store.listBans() });
     return;
   }
 
@@ -251,18 +256,16 @@ async function handleHttp(
       user?: string;
       address?: string;
     }>(req);
-    if (body.type === "sonobus-connection" || (body.id && !udpRelay?.listBans().some((ban) => ban.id === body.id))) {
-      const result = await connectionServer?.unban(toConnectionUnban(body));
-      if (result) {
-        sendJson(res, 200, result);
-        return;
+    const removed = await store.removeBans(body);
+    let removedFromServices = 0;
+    for (const ban of removed) {
+      if (ban.type === "sonobus-connection") {
+        removedFromServices += (await connectionServer?.unban(toConnectionUnban(ban)))?.removed ?? 0;
+      } else {
+        removedFromServices += udpRelay?.unban(toUdpUnban(ban, false)).removed ?? 0;
       }
     }
-    if (!udpRelay) {
-      sendJson(res, 503, { error: "UDP relay is disabled." });
-      return;
-    }
-    sendJson(res, 200, udpRelay.unban(toUdpUnban(body)));
+    sendJson(res, 200, { removed: removed.length || removedFromServices });
     return;
   }
 
@@ -353,11 +356,11 @@ function toConnectionBan(body: { group?: string; user?: string; address?: string
   return compact({ ...toConnectionKick(body), ttlSeconds: body.ttlSeconds });
 }
 
-function toConnectionUnban(body: { id?: string; group?: string; user?: string; address?: string }) {
-  if (body.id) {
+function toConnectionUnban(body: { id?: string; group?: string; user?: string; address?: string }, preferId = false) {
+  if (preferId && body.id) {
     return { id: body.id };
   }
-  return compact({ id: body.id, ...toConnectionKick(body) });
+  return compact(toConnectionKick(body));
 }
 
 function toUdpBan(body: { type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string; ttlSeconds?: number }) {
@@ -372,15 +375,88 @@ function toUdpBan(body: { type?: "udp-session" | "sonobus-udp" | "sonobus-connec
   };
 }
 
-function toUdpUnban(body: { id?: string; type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string }) {
+function toUdpUnban(
+  body: { id?: string; type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string },
+  preferId = true
+) {
   return {
-    id: body.id,
+    id: preferId ? body.id : undefined,
     type: body.type === "udp-session" ? "udp-session" as const : "sonobus-udp" as const,
     roomId: body.roomId,
     userId: body.userId,
     group: body.group,
     user: body.user,
     address: body.address
+  };
+}
+
+async function restorePersistentBans(store: Store, udpRelay?: UdpRelay, connectionServer?: ConnectionServerAdmin): Promise<void> {
+  const bans = await store.listBans();
+  for (const ban of bans) {
+    if (ban.type === "sonobus-connection") {
+      await connectionServer?.ban(toConnectionBan(toRestoredBanRequest(ban)));
+    } else {
+      udpRelay?.restoreBan(toUdpBanRecord(ban));
+    }
+  }
+}
+
+function toStoredBan(
+  body: { type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string; ttlSeconds?: number },
+  serviceExpiresAt: string | null
+) {
+  return {
+    type: storedBanType(body.type),
+    roomId: body.roomId,
+    userId: body.userId,
+    group: body.group,
+    user: body.user,
+    address: body.address,
+    expiresAt: body.ttlSeconds !== undefined ? expiresAtForTtl(body.ttlSeconds) : serviceExpiresAt
+  };
+}
+
+function storedBanType(type: "udp-session" | "sonobus-udp" | "sonobus-connection" | undefined): BanType {
+  if (type === "udp-session" || type === "sonobus-connection") {
+    return type;
+  }
+  return "sonobus-udp";
+}
+
+function expiresAtForTtl(ttlSeconds: number): string | null {
+  if (ttlSeconds <= 0) {
+    return null;
+  }
+  const clamped = Math.max(1, Math.min(Number(ttlSeconds), 30 * 24 * 60 * 60));
+  return new Date(Date.now() + clamped * 1000).toISOString();
+}
+
+function ttlSecondsForBan(ban: BanRecord): number {
+  if (ban.expiresAt === null) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil((new Date(ban.expiresAt).getTime() - Date.now()) / 1000));
+}
+
+function toRestoredBanRequest(ban: BanRecord) {
+  return {
+    group: ban.group,
+    user: ban.user,
+    address: ban.address,
+    ttlSeconds: ttlSecondsForBan(ban)
+  };
+}
+
+function toUdpBanRecord(ban: BanRecord) {
+  return {
+    id: ban.id,
+    type: ban.type === "udp-session" ? "udp-session" as const : "sonobus-udp" as const,
+    roomId: ban.roomId,
+    userId: ban.userId,
+    group: ban.group,
+    user: ban.user,
+    address: ban.address,
+    expiresAt: ban.expiresAt
   };
 }
 
@@ -755,7 +831,7 @@ const adminPageHtml = String.raw`<!doctype html>
       <div class="row">
         <button id="refreshBansBtn">刷新封禁</button>
       </div>
-      <div class="subtle">误封后可在这里解除。封禁当前保存在服务进程内存里，重启 Docker 后会清空。</div>
+      <div class="subtle">误封后可在这里解除。封禁保存在数据库里，Docker 重启后会自动恢复。</div>
       <div id="banStatus" class="status"></div>
       <div class="table-wrap">
         <table>

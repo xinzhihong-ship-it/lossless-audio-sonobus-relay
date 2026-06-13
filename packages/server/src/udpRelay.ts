@@ -45,12 +45,14 @@ export type KickRequest = {
 
 export type BanRequest = {
   type?: "udp-session" | "sonobus-udp";
+  id?: string;
   roomId?: string;
   userId?: string;
   group?: string;
   user?: string;
   address?: string;
   ttlSeconds?: number;
+  expiresAt?: string | null;
 };
 
 export type KickResult = {
@@ -70,7 +72,7 @@ type RawPeer = {
   lastSeenAt: string;
 };
 
-type Ban = Required<Pick<BanRequest, "type">> & Omit<BanRequest, "type" | "ttlSeconds"> & {
+type Ban = Required<Pick<BanRequest, "type">> & Omit<BanRequest, "id" | "type" | "ttlSeconds" | "expiresAt"> & {
   id: string;
   sessionId?: string;
   expiresAt: number | null;
@@ -158,11 +160,26 @@ export class UdpRelay {
 
   ban(request: BanRequest): { banned: number; expiresAt: string | null } {
     const type = request.type ?? "sonobus-udp";
-    const ttlSeconds = Number(request.ttlSeconds ?? 3600);
-    const expiresAt = ttlSeconds <= 0 ? null : Date.now() + Math.max(1, Math.min(ttlSeconds, 30 * 24 * 60 * 60)) * 1000;
-    this.bans.push({ ...request, id: randomUUID(), type, expiresAt });
+    const expiresAt = banExpiresAt(request);
+    const ban: Ban = { ...request, id: request.id ?? randomUUID(), type, expiresAt };
+    this.upsertBan(ban);
     const result = this.kick({ ...request, type });
     return { banned: result.kicked, expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString() };
+  }
+
+  restoreBan(record: BanRequest & { id: string; type: "udp-session" | "sonobus-udp"; expiresAt: string | null }): void {
+    const ban: Ban = {
+      id: record.id,
+      type: record.type,
+      roomId: record.roomId,
+      userId: record.userId,
+      group: record.group,
+      user: record.user,
+      address: record.address,
+      expiresAt: record.expiresAt === null ? null : new Date(record.expiresAt).getTime()
+    };
+    this.upsertBan(ban);
+    this.kick(record);
   }
 
   listBans(): BanRecord[] {
@@ -302,6 +319,20 @@ export class UdpRelay {
     const now = Date.now();
     this.bans = this.bans.filter((ban) => ban.expiresAt === null || ban.expiresAt > now);
   }
+
+  private upsertBan(ban: Ban): void {
+    this.pruneExpiredBans();
+    this.bans = this.bans.filter((existing) => existing.id !== ban.id);
+    this.bans.push(ban);
+  }
+}
+
+function banExpiresAt(request: BanRequest): number | null {
+  if (request.expiresAt !== undefined) {
+    return request.expiresAt === null ? null : new Date(request.expiresAt).getTime();
+  }
+  const ttlSeconds = Number(request.ttlSeconds ?? 3600);
+  return ttlSeconds <= 0 ? null : Date.now() + Math.max(1, Math.min(ttlSeconds, 30 * 24 * 60 * 60)) * 1000;
 }
 
 type SonoBusRelayPacket = {

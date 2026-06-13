@@ -17,6 +17,32 @@ export type RoomRecord = {
   createdAt: string;
 };
 
+export type BanType = "udp-session" | "sonobus-udp" | "sonobus-connection";
+
+export type BanRecord = {
+  id: string;
+  type: BanType;
+  roomId?: string;
+  userId?: string;
+  group?: string;
+  user?: string;
+  address?: string;
+  expiresAt: string | null;
+  createdAt: string;
+};
+
+export type CreateBanInput = Omit<BanRecord, "id" | "createdAt">;
+
+export type RemoveBanRequest = {
+  id?: string;
+  type?: BanType;
+  roomId?: string;
+  userId?: string;
+  group?: string;
+  user?: string;
+  address?: string;
+};
+
 export interface Store {
   init(): Promise<void>;
   getUserByUsername(username: string): Promise<UserRecord | undefined>;
@@ -26,12 +52,16 @@ export interface Store {
   listRooms(): Promise<RoomRecord[]>;
   createRoom(name: string, createdBy: string): Promise<RoomRecord>;
   getRoom(id: string): Promise<RoomRecord | undefined>;
+  listBans(): Promise<BanRecord[]>;
+  createBan(input: CreateBanInput): Promise<BanRecord>;
+  removeBans(request: RemoveBanRequest): Promise<BanRecord[]>;
   close(): Promise<void>;
 }
 
 export class MemoryStore implements Store {
   private users = new Map<string, UserRecord>();
   private rooms = new Map<string, RoomRecord>();
+  private bans = new Map<string, BanRecord>();
 
   async init(): Promise<void> {}
 
@@ -91,7 +121,44 @@ export class MemoryStore implements Store {
     return this.rooms.get(id);
   }
 
+  async listBans(): Promise<BanRecord[]> {
+    this.pruneExpiredBans();
+    return [...this.bans.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async createBan(input: CreateBanInput): Promise<BanRecord> {
+    this.pruneExpiredBans();
+    const ban: BanRecord = {
+      ...input,
+      id: randomUUID(),
+      createdAt: new Date().toISOString()
+    };
+    this.bans.set(ban.id, ban);
+    return ban;
+  }
+
+  async removeBans(request: RemoveBanRequest): Promise<BanRecord[]> {
+    this.pruneExpiredBans();
+    const removed: BanRecord[] = [];
+    for (const [id, ban] of this.bans) {
+      if (matchesBanRemoval(request, ban)) {
+        removed.push(ban);
+        this.bans.delete(id);
+      }
+    }
+    return removed;
+  }
+
   async close(): Promise<void> {}
+
+  private pruneExpiredBans(): void {
+    const now = Date.now();
+    for (const [id, ban] of this.bans) {
+      if (ban.expiresAt !== null && new Date(ban.expiresAt).getTime() <= now) {
+        this.bans.delete(id);
+      }
+    }
+  }
 }
 
 export class PostgresStore implements Store {
@@ -115,6 +182,18 @@ export class PostgresStore implements Store {
         id uuid primary key,
         name text not null,
         created_by uuid not null references users(id),
+        created_at timestamptz not null default now()
+      );
+
+      create table if not exists admin_bans (
+        id uuid primary key,
+        type text not null check (type in ('udp-session', 'sonobus-udp', 'sonobus-connection')),
+        room_id text,
+        user_id text,
+        group_name text,
+        user_name text,
+        address text,
+        expires_at timestamptz,
         created_at timestamptz not null default now()
       );
     `);
@@ -172,8 +251,40 @@ export class PostgresStore implements Store {
     return result.rows[0] ? mapRoom(result.rows[0]) : undefined;
   }
 
+  async listBans(): Promise<BanRecord[]> {
+    await this.pruneExpiredBans();
+    const result = await this.pool.query("select * from admin_bans order by created_at asc");
+    return result.rows.map(mapBan);
+  }
+
+  async createBan(input: CreateBanInput): Promise<BanRecord> {
+    await this.pruneExpiredBans();
+    const id = randomUUID();
+    const result = await this.pool.query(
+      `insert into admin_bans (id, type, room_id, user_id, group_name, user_name, address, expires_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       returning *`,
+      [id, input.type, input.roomId, input.userId, input.group, input.user, input.address, input.expiresAt]
+    );
+    return mapBan(result.rows[0]);
+  }
+
+  async removeBans(request: RemoveBanRequest): Promise<BanRecord[]> {
+    await this.pruneExpiredBans();
+    const bans = (await this.listBans()).filter((ban) => matchesBanRemoval(request, ban));
+    if (!bans.length) {
+      return [];
+    }
+    await this.pool.query("delete from admin_bans where id = any($1::uuid[])", [bans.map((ban) => ban.id)]);
+    return bans;
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  private async pruneExpiredBans(): Promise<void> {
+    await this.pool.query("delete from admin_bans where expires_at is not null and expires_at <= now()");
   }
 }
 
@@ -194,4 +305,54 @@ function mapRoom(row: Record<string, unknown>): RoomRecord {
     createdBy: String(row.created_by),
     createdAt: new Date(String(row.created_at)).toISOString()
   };
+}
+
+function mapBan(row: Record<string, unknown>): BanRecord {
+  return {
+    id: String(row.id),
+    type: parseBanType(String(row.type)),
+    roomId: optionalString(row.room_id),
+    userId: optionalString(row.user_id),
+    group: optionalString(row.group_name),
+    user: optionalString(row.user_name),
+    address: optionalString(row.address),
+    expiresAt: row.expires_at === null || row.expires_at === undefined ? null : new Date(String(row.expires_at)).toISOString(),
+    createdAt: new Date(String(row.created_at)).toISOString()
+  };
+}
+
+function parseBanType(type: string): BanType {
+  if (type === "udp-session" || type === "sonobus-udp" || type === "sonobus-connection") {
+    return type;
+  }
+  throw new Error(`Invalid ban type: ${type}`);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return value === null || value === undefined ? undefined : String(value);
+}
+
+function matchesBanRemoval(request: RemoveBanRequest, ban: BanRecord): boolean {
+  if (request.id) {
+    return request.id === ban.id;
+  }
+  if (request.type && request.type !== ban.type) {
+    return false;
+  }
+  if (request.roomId && request.roomId !== ban.roomId) {
+    return false;
+  }
+  if (request.userId && request.userId !== ban.userId) {
+    return false;
+  }
+  if (request.group && request.group !== ban.group) {
+    return false;
+  }
+  if (request.user && request.user !== ban.user) {
+    return false;
+  }
+  if (request.address && request.address !== ban.address) {
+    return false;
+  }
+  return Boolean(request.type || request.roomId || request.userId || request.group || request.user || request.address);
 }

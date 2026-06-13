@@ -417,12 +417,20 @@ test("admin controls include SonoBus connection server users", async () => {
     assert.equal(banResult.banned, 1);
     assert.equal(connectionServer.lastBan?.type, "sonobus-connection");
 
-    const bans = await get<{ bans: Array<{ id: string; type: string; group?: string; user?: string }> }>(baseUrl, "/admin/bans", adminToken);
-    assert.deepEqual(bans.bans, connectionServer.bansList);
+    const bans = await get<{ bans: Array<{ id: string; type: string; group?: string; user?: string; expiresAt?: string | null }> }>(
+      baseUrl,
+      "/admin/bans",
+      adminToken
+    );
+    assert.equal(bans.bans.length, 1);
+    assert.equal(bans.bans[0].type, "sonobus-connection");
+    assert.equal(bans.bans[0].group, "band");
+    assert.equal(bans.bans[0].user, "alice");
+    assert.match(bans.bans[0].id, /^[0-9a-f-]{36}$/);
 
-    const unbanResult = await post<{ removed: number }>(baseUrl, "/admin/bans/remove", adminToken, { id: "ban-1" });
+    const unbanResult = await post<{ removed: number }>(baseUrl, "/admin/bans/remove", adminToken, { id: bans.bans[0].id });
     assert.equal(unbanResult.removed, 1);
-    assert.deepEqual(connectionServer.lastUnban, { id: "ban-1" });
+    assert.deepEqual(connectionServer.lastUnban, { type: "sonobus-connection", group: "band", user: "alice" });
   } finally {
     await app.close();
   }
@@ -465,6 +473,203 @@ test("admin can create permanent SonoBus connection server bans", async () => {
     });
   } finally {
     await app.close();
+  }
+});
+
+test("persistent SonoBus connection server bans survive app restarts", async () => {
+  const store = new MemoryStore();
+  const firstConnectionServer = new FakeConnectionServerAdmin();
+  const firstApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    store,
+    connectionServer: firstConnectionServer
+  });
+
+  await new Promise<void>((resolve) => firstApp.server.listen(0, "127.0.0.1", resolve));
+  const firstAddress = firstApp.server.address();
+  assert(firstAddress && typeof firstAddress === "object");
+  const firstBaseUrl = `http://127.0.0.1:${firstAddress.port}`;
+
+  const adminToken = await login(firstBaseUrl, "admin", "admin-pass");
+  await post(firstBaseUrl, "/admin/bans", adminToken, {
+    type: "sonobus-connection",
+    group: "band",
+    user: "alice",
+    address: "203.0.113.9",
+    ttlSeconds: 0
+  });
+  await firstApp.close();
+
+  const secondConnectionServer = new FakeConnectionServerAdmin();
+  const secondApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    store,
+    connectionServer: secondConnectionServer
+  });
+
+  await new Promise<void>((resolve) => secondApp.server.listen(0, "127.0.0.1", resolve));
+  const secondAddress = secondApp.server.address();
+  assert(secondAddress && typeof secondAddress === "object");
+  const secondBaseUrl = `http://127.0.0.1:${secondAddress.port}`;
+
+  try {
+    assert.deepEqual(secondConnectionServer.lastBan, {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      address: "203.0.113.9",
+      ttlSeconds: 0
+    });
+
+    const secondToken = await login(secondBaseUrl, "admin", "admin-pass");
+    const bans = await get<{ bans: Array<{ type: string; group?: string; user?: string; address?: string; expiresAt: string | null }> }>(
+      secondBaseUrl,
+      "/admin/bans",
+      secondToken
+    );
+    assert.deepEqual(bans.bans.map(({ type, group, user, address, expiresAt }) => ({ type, group, user, address, expiresAt })), [
+      {
+        type: "sonobus-connection",
+        group: "band",
+        user: "alice",
+        address: "203.0.113.9",
+        expiresAt: null
+      }
+    ]);
+  } finally {
+    await secondApp.close();
+  }
+});
+
+test("persistent UDP relay bans survive app restarts and keep blocking peers", async () => {
+  const store = new MemoryStore();
+  const firstApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0,
+    store
+  });
+
+  await new Promise<void>((resolve) => firstApp.server.listen(0, "127.0.0.1", resolve));
+  const firstAddress = firstApp.server.address();
+  assert(firstAddress && typeof firstAddress === "object");
+  const firstBaseUrl = `http://127.0.0.1:${firstAddress.port}`;
+
+  const adminToken = await login(firstBaseUrl, "admin", "admin-pass");
+  await post(firstBaseUrl, "/admin/bans", adminToken, {
+    type: "sonobus-udp",
+    group: "band",
+    user: "alice",
+    ttlSeconds: 0
+  });
+  await firstApp.close();
+
+  const secondApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0,
+    store
+  });
+
+  await new Promise<void>((resolve) => secondApp.server.listen(0, "127.0.0.1", resolve));
+  const secondAddress = secondApp.server.address();
+  assert(secondAddress && typeof secondAddress === "object");
+  const secondBaseUrl = `http://127.0.0.1:${secondAddress.port}`;
+
+  const aliceSocket = dgram.createSocket("udp4");
+
+  try {
+    const secondToken = await login(secondBaseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(secondBaseUrl, "/rooms", secondToken, { name: "persisted-ban-room" });
+    const relayInfo = await post<{ udpPort: number }>(secondBaseUrl, `/rooms/${roomResponse.room.id}/relay-session`, secondToken, {});
+
+    await bindUdp(aliceSocket);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const connections = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      secondBaseUrl,
+      "/admin/connections",
+      secondToken
+    );
+    assert.equal(connections.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), false);
+
+    const bans = await get<{ bans: Array<{ type: string; group?: string; user?: string; expiresAt: string | null }> }>(
+      secondBaseUrl,
+      "/admin/bans",
+      secondToken
+    );
+    assert.deepEqual(bans.bans.map(({ type, group, user, expiresAt }) => ({ type, group, user, expiresAt })), [
+      { type: "sonobus-udp", group: "band", user: "alice", expiresAt: null }
+    ]);
+  } finally {
+    aliceSocket.close();
+    await secondApp.close();
+  }
+});
+
+test("removing a persistent ban deletes it from restart restore state", async () => {
+  const store = new MemoryStore();
+  const firstConnectionServer = new FakeConnectionServerAdmin();
+  const firstApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    store,
+    connectionServer: firstConnectionServer
+  });
+
+  await new Promise<void>((resolve) => firstApp.server.listen(0, "127.0.0.1", resolve));
+  const firstAddress = firstApp.server.address();
+  assert(firstAddress && typeof firstAddress === "object");
+  const firstBaseUrl = `http://127.0.0.1:${firstAddress.port}`;
+
+  const adminToken = await login(firstBaseUrl, "admin", "admin-pass");
+  await post(firstBaseUrl, "/admin/bans", adminToken, {
+    type: "sonobus-connection",
+    group: "band",
+    user: "alice",
+    address: "203.0.113.9",
+    ttlSeconds: 0
+  });
+  const firstBans = await get<{ bans: Array<{ id: string }> }>(firstBaseUrl, "/admin/bans", adminToken);
+  assert.equal(firstBans.bans.length, 1);
+  await post(firstBaseUrl, "/admin/bans/remove", adminToken, { id: firstBans.bans[0].id });
+  await firstApp.close();
+
+  const secondConnectionServer = new FakeConnectionServerAdmin();
+  const secondApp = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    store,
+    connectionServer: secondConnectionServer
+  });
+
+  await new Promise<void>((resolve) => secondApp.server.listen(0, "127.0.0.1", resolve));
+  const secondAddress = secondApp.server.address();
+  assert(secondAddress && typeof secondAddress === "object");
+  const secondBaseUrl = `http://127.0.0.1:${secondAddress.port}`;
+
+  try {
+    assert.equal(secondConnectionServer.lastBan, undefined);
+    const secondToken = await login(secondBaseUrl, "admin", "admin-pass");
+    const secondBans = await get<{ bans: Array<{ id: string }> }>(secondBaseUrl, "/admin/bans", secondToken);
+    assert.equal(secondBans.bans.length, 0);
+  } finally {
+    await secondApp.close();
   }
 });
 
