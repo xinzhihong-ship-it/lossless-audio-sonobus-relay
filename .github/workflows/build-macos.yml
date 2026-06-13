@@ -1,0 +1,54 @@
+name: Build macOS SonoBus
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/build-macos.yml"
+      - "sonobus/**"
+
+jobs:
+  build-macos:
+    name: macOS Universal Release
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        working-directory: sonobus
+        run: |
+          cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUniversalBinary=ON \
+            -B build
+
+      - name: Build
+        working-directory: sonobus
+        run: cmake --build build --config Release --parallel "$(sysctl -n hw.logicalcpu)"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/macos-universal
+          cp -pR sonobus/build/SonoBus_artefacts/Release/Standalone/SonoBus.app artifacts/macos-universal/
+          cp -pR sonobus/build/SonoBus_artefacts/Release/VST3/SonoBus.vst3 artifacts/macos-universal/
+          cp -pR sonobus/build/SonoBusInst_artefacts/Release/VST3/SonoBusInstrument.vst3 artifacts/macos-universal/
+          if [ -d sonobus/build/SonoBus_artefacts/Release/AU/SonoBus.component ]; then
+            cp -pR sonobus/build/SonoBus_artefacts/Release/AU/SonoBus.component artifacts/macos-universal/
+          fi
+          if [ -d sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 ]; then
+            cp -pR sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 artifacts/macos-universal/
+          fi
+          ditto -c -k --sequesterRsrc --keepParent artifacts/macos-universal sonobus-macos-universal.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-macos-universal
+          path: sonobus-macos-universal.zip

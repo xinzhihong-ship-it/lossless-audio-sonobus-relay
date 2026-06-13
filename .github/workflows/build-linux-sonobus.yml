@@ -1,0 +1,74 @@
+name: Build Linux SonoBus
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/build-linux-sonobus.yml"
+      - "sonobus/**"
+
+jobs:
+  build-linux-sonobus:
+    name: Linux x64 Release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            pkg-config \
+            libjack-jackd2-dev \
+            libopus-dev \
+            opus-tools \
+            libasound2-dev \
+            libx11-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libgl1-mesa-dev \
+            libfreetype6-dev \
+            libcurl4-openssl-dev \
+            libwebkit2gtk-4.1-dev
+
+      - name: Configure
+        working-directory: sonobus
+        run: cmake -DCMAKE_BUILD_TYPE=Release -B build
+
+      - name: Build
+        working-directory: sonobus
+        run: cmake --build build --config Release --parallel "$(nproc)"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/linux-x64
+          if [ -f sonobus/build/SonoBus_artefacts/Release/Standalone/SonoBus ]; then
+            cp -p sonobus/build/SonoBus_artefacts/Release/Standalone/SonoBus artifacts/linux-x64/
+          fi
+          if [ -f sonobus/build/SonoBus_artefacts/Release/sonobus ]; then
+            cp -p sonobus/build/SonoBus_artefacts/Release/sonobus artifacts/linux-x64/
+          fi
+          cp -pR sonobus/build/SonoBus_artefacts/Release/VST3/SonoBus.vst3 artifacts/linux-x64/
+          cp -pR sonobus/build/SonoBusInst_artefacts/Release/VST3/SonoBusInstrument.vst3 artifacts/linux-x64/
+          if [ -d sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 ]; then
+            cp -pR sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 artifacts/linux-x64/
+          fi
+          cp -p sonobus/linux/sonobus.desktop artifacts/linux-x64/
+          tar -czf sonobus-linux-x64.tar.gz -C artifacts linux-x64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-linux-x64
+          path: sonobus-linux-x64.tar.gz
