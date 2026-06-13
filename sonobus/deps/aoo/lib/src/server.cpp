@@ -7,6 +7,9 @@
 #include <functional>
 #include <algorithm>
 #include <random>
+#include <chrono>
+#include <sstream>
+#include <iomanip>
 
 #define AOONET_MSG_CLIENT_PING \
     AOO_MSG_DOMAIN AOONET_MSG_CLIENT AOONET_MSG_PING
@@ -272,8 +275,86 @@ int32_t aoo::net::server::handle_events(aoo_eventhandler fn, void *user){
     return n;
 }
 
+int32_t aoonet_server_get_state_json(aoonet_server *server, char *buffer, int32_t size){
+    return server->get_state_json(buffer, size);
+}
+
+int32_t aoonet_server_kick(aoonet_server *server, const char *group, const char *user, const char *address){
+    return server->kick(group, user, address);
+}
+
+int32_t aoonet_server_ban(aoonet_server *server, const char *group, const char *user, const char *address,
+                          int32_t ttl_seconds, char *buffer, int32_t size){
+    return server->ban(group, user, address, ttl_seconds, buffer, size);
+}
+
+int32_t aoonet_server_get_bans_json(aoonet_server *server, char *buffer, int32_t size){
+    return server->get_bans_json(buffer, size);
+}
+
+int32_t aoonet_server_unban(aoonet_server *server, const char *id, const char *group, const char *user, const char *address){
+    return server->unban(id, group, user, address);
+}
+
 namespace aoo {
 namespace net {
+
+namespace {
+int64_t unix_seconds()
+{
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::string iso_time(int64_t seconds)
+{
+    std::time_t t = static_cast<std::time_t>(seconds);
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    std::ostringstream os;
+    os << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    return os.str();
+}
+
+std::string json_escape(const std::string& value)
+{
+    std::ostringstream os;
+    for (char c : value) {
+        switch (c) {
+            case '"': os << "\\\""; break;
+            case '\\': os << "\\\\"; break;
+            case '\b': os << "\\b"; break;
+            case '\f': os << "\\f"; break;
+            case '\n': os << "\\n"; break;
+            case '\r': os << "\\r"; break;
+            case '\t': os << "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    os << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(c));
+                } else {
+                    os << c;
+                }
+        }
+    }
+    return os.str();
+}
+
+void json_prop(std::ostringstream& os, const char *name, const std::string& value, bool& first)
+{
+    if (value.empty()) {
+        return;
+    }
+    if (!first) {
+        os << ",";
+    }
+    first = false;
+    os << "\"" << name << "\":\"" << json_escape(value) << "\"";
+}
+}
 
 std::string server::error_to_string(error e){
     switch (e){
@@ -288,9 +369,85 @@ std::string server::error_to_string(error e){
     }
 }
 
+int32_t server::copy_json_result(const std::string& json, char *buffer, int32_t size)
+{
+    if (!buffer || size <= 0) {
+        return (int32_t) json.size();
+    }
+    int32_t n = std::min<int32_t>((int32_t)json.size(), size - 1);
+    memcpy(buffer, json.data(), n);
+    buffer[n] = 0;
+    return n;
+}
+
+int32_t server::get_state_json(char *buffer, int32_t size)
+{
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
+    prune_bans_locked();
+    return copy_json_result(state_json_locked(), buffer, size);
+}
+
+int32_t server::kick(const char *group, const char *user, const char *address)
+{
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
+    auto kicked = kick_locked(group, user, address);
+    if (kicked > 0) {
+        signal();
+    }
+    return kicked;
+}
+
+int32_t server::ban(const char *group, const char *user, const char *address,
+                    int32_t ttl_seconds, char *buffer, int32_t size)
+{
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
+    prune_bans_locked();
+    ban_record record;
+    record.id = std::to_string(unix_seconds()) + "-" + std::to_string(bans_.size() + 1);
+    record.group = group ? group : "";
+    record.user = user ? user : "";
+    record.address = address ? address : "";
+    auto ttl = std::max<int32_t>(1, std::min<int32_t>(ttl_seconds > 0 ? ttl_seconds : 3600, 30 * 24 * 60 * 60));
+    record.expires_at = unix_seconds() + ttl;
+    bans_.push_back(record);
+    auto kicked = kick_locked(group, user, address);
+    if (kicked > 0) {
+        signal();
+    }
+
+    std::ostringstream os;
+    os << "{\"banned\":" << kicked << ",\"expiresAt\":\"" << iso_time(record.expires_at) << "\"}";
+    return copy_json_result(os.str(), buffer, size);
+}
+
+int32_t server::get_bans_json(char *buffer, int32_t size)
+{
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
+    prune_bans_locked();
+    return copy_json_result(bans_json_locked(), buffer, size);
+}
+
+int32_t server::unban(const char *id, const char *group, const char *user, const char *address)
+{
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
+    prune_bans_locked();
+    auto before = bans_.size();
+    bans_.erase(std::remove_if(bans_.begin(), bans_.end(), [&](const ban_record& ban) {
+        if (id && *id) {
+            return ban.id == id;
+        }
+        if (group && *group && ban.group != group) return false;
+        if (user && *user && ban.user != user) return false;
+        if (address && *address && ban.address != address) return false;
+        return (group && *group) || (user && *user) || (address && *address);
+    }), bans_.end());
+    return (int32_t)(before - bans_.size());
+}
+
 std::shared_ptr<user> server::get_user(const std::string& name,
                                        const std::string& pwd, error& e)
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     auto usr = find_user(name);
     if (usr){
         // check if someone is already logged in
@@ -330,11 +487,113 @@ std::shared_ptr<user> server::find_user(const std::string& name)
     return nullptr;
 }
 
+std::string server::state_json_locked() const
+{
+    std::ostringstream os;
+    os << "{\"connections\":[";
+    bool first_connection = true;
+    for (auto& grp : groups_) {
+        for (auto& usr : grp->users()) {
+            if (!usr->endpoint) {
+                continue;
+            }
+            if (!first_connection) {
+                os << ",";
+            }
+            first_connection = false;
+            bool first = true;
+            os << "{";
+            json_prop(os, "type", "sonobus-connection", first);
+            json_prop(os, "group", grp->name, first);
+            json_prop(os, "user", usr->name, first);
+            json_prop(os, "address", usr->endpoint->public_address.name(), first);
+            if (!first) {
+                os << ",";
+            }
+            os << "\"port\":" << usr->endpoint->public_address.port();
+            os << "}";
+        }
+    }
+    os << "]}";
+    return os.str();
+}
+
+std::string server::bans_json_locked() const
+{
+    std::ostringstream os;
+    os << "{\"bans\":[";
+    for (size_t i = 0; i < bans_.size(); ++i) {
+        if (i > 0) {
+            os << ",";
+        }
+        bool first = true;
+        os << "{";
+        json_prop(os, "id", bans_[i].id, first);
+        json_prop(os, "type", "sonobus-connection", first);
+        json_prop(os, "group", bans_[i].group, first);
+        json_prop(os, "user", bans_[i].user, first);
+        json_prop(os, "address", bans_[i].address, first);
+        json_prop(os, "expiresAt", iso_time(bans_[i].expires_at), first);
+        os << "}";
+    }
+    os << "]}";
+    return os.str();
+}
+
+int server::kick_locked(const char *group, const char *user, const char *address)
+{
+    int kicked = 0;
+    for (auto& usr : users_) {
+        if (!usr->endpoint) {
+            continue;
+        }
+        const bool user_match = !user || !*user || usr->name == user;
+        const bool address_match = !address || !*address || usr->endpoint->public_address.name() == address;
+        bool group_match = !group || !*group;
+        if (!group_match) {
+            for (auto& grp : usr->groups()) {
+                if (grp->name == group) {
+                    group_match = true;
+                    break;
+                }
+            }
+        }
+        if (user_match && address_match && group_match) {
+            usr->endpoint->close();
+            kicked++;
+        }
+    }
+    update();
+    return kicked;
+}
+
+bool server::is_banned_locked(const std::string& group, const std::string& user, const std::string& address) const
+{
+    for (auto& ban : bans_) {
+        if (!ban.group.empty() && ban.group != group) continue;
+        if (!ban.user.empty() && ban.user != user) continue;
+        if (!ban.address.empty() && ban.address != address) continue;
+        if (!ban.group.empty() || !ban.user.empty() || !ban.address.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void server::prune_bans_locked()
+{
+    auto now = unix_seconds();
+    bans_.erase(std::remove_if(bans_.begin(), bans_.end(), [&](const ban_record& ban) {
+        return ban.expires_at <= now;
+    }), bans_.end());
+}
+
 std::shared_ptr<group> server::get_group(const std::string& name,
                                          const std::string& pwd,
                                          bool is_public,
                                          error& e)
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     auto grp = find_group(name);
     if (grp){
         // check password for existing group
@@ -375,27 +634,32 @@ std::shared_ptr<group> server::find_group(const std::string& name)
 
 int32_t server::get_group_count() const
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     return (int32_t) groups_.size();
 }
 
 int32_t server::get_user_count() const
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     return (int32_t) users_.size();    
 }
 
 void server::on_user_joined(user &usr){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     auto e = std::make_unique<user_event>(AOONET_SERVER_USER_JOIN_EVENT,
                                           usr.name.c_str());
     push_event(std::move(e));
 }
 
 void server::on_user_left(user &usr){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     auto e = std::make_unique<user_event>(AOONET_SERVER_USER_LEAVE_EVENT,
                                           usr.name.c_str());
     push_event(std::move(e));
 }
 
 void server::on_user_joined_group(user& usr, group& grp){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     // 1) send the new member to existing group members
     // 2) send existing group members to the new member
     for (auto& peer : grp.users()){
@@ -435,6 +699,7 @@ void server::on_user_joined_group(user& usr, group& grp){
 }
 
 void server::on_user_left_group(user& usr, group& grp){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     // notify group members
     for (auto& peer : grp.users()){
         if (peer.get() != &usr){
@@ -460,6 +725,7 @@ void server::on_user_left_group(user& usr, group& grp){
 }
 
 void server::on_user_wants_public_groups(user& usr){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     // 1) send all existing public groups to the user
     for (auto& grp : groups_){
         if (!grp->is_public) continue;
@@ -478,6 +744,7 @@ void server::on_user_wants_public_groups(user& usr){
 
 void server::on_public_group_modified(group& grp)
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     char buf[AOO_MAXPACKETSIZE];
 
     osc::OutboundPacketStream msg(buf, sizeof(buf));
@@ -496,6 +763,7 @@ void server::on_public_group_modified(group& grp)
 
 void server::on_public_group_removed(group& grp)
 {
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     // notify all users who care
     char buf[AOO_MAXPACKETSIZE];
 
@@ -673,6 +941,7 @@ void server::wait_for_event(){
 }
 
 void server::update(){
+    std::lock_guard<std::recursive_mutex> lock(admin_mutex_);
     // remove closed clients
     auto result = std::remove_if(clients_.begin(), clients_.end(),
                                  [](auto& c){ return !c->is_active(); });
@@ -1173,7 +1442,17 @@ void client_endpoint::handle_login(const osc::ReceivedMessage& msg)
     
     server::error err;
     if (!user_){
-        user_ = server_->get_user(username, password, err);
+        {
+            std::lock_guard<std::recursive_mutex> lock(server_->admin_mutex_);
+            server_->prune_bans_locked();
+            if (server_->is_banned_locked("", username, public_ip)) {
+                err = server::error::access_denied;
+                errmsg = server::error_to_string(err);
+            }
+        }
+        if (errmsg.empty()) {
+            user_ = server_->get_user(username, password, err);
+        }
         if (user_){
             // success
             public_address = ip_address(public_ip, public_port);
@@ -1220,7 +1499,15 @@ void client_endpoint::handle_group_join(const osc::ReceivedMessage& msg)
 
     server::error err;
     if (user_){
-        auto grp = server_->get_group(name, password, is_public, err);
+        {
+            std::lock_guard<std::recursive_mutex> lock(server_->admin_mutex_);
+            server_->prune_bans_locked();
+            if (server_->is_banned_locked(name, user_->name, public_address.name())) {
+                err = server::error::access_denied;
+                errmsg = server::error_to_string(err);
+            }
+        }
+        auto grp = errmsg.empty() ? server_->get_group(name, password, is_public, err) : nullptr;
         if (grp){
             if (user_->add_group(grp)){
                 grp->add_user(user_);

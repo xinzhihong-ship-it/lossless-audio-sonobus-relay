@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { WebSocketServer } from "ws";
 import { signToken, verifyPassword, verifyToken, type TokenClaims } from "./auth.js";
+import { HttpConnectionServerAdmin, type ConnectionServerAdmin } from "./connectionServerAdmin.js";
 import { RoomHub } from "./roomHub.js";
 import { MemoryStore, PostgresStore, type Store } from "./store.js";
 import { UdpRelay } from "./udpRelay.js";
@@ -13,6 +14,8 @@ export type ServerConfig = {
   databaseUrl?: string;
   maxBytesPerSecondPerClient: number;
   udpRelayPort?: number;
+  connectionServerAdminUrl?: string;
+  connectionServer?: ConnectionServerAdmin;
   store?: Store;
 };
 
@@ -29,9 +32,10 @@ export async function createApp(config: ServerConfig): Promise<App> {
 
   const hub = new RoomHub({ maxBytesPerSecondPerClient: config.maxBytesPerSecondPerClient });
   const udpRelay = config.udpRelayPort === undefined ? undefined : new UdpRelay(config.udpRelayPort);
+  const connectionServer = config.connectionServer ?? (config.connectionServerAdminUrl ? new HttpConnectionServerAdmin(config.connectionServerAdminUrl) : undefined);
   await udpRelay?.start();
   const server = http.createServer((req, res) => {
-    handleHttp(req, res, store, config, hub, udpRelay).catch((error) => {
+    handleHttp(req, res, store, config, hub, udpRelay, connectionServer).catch((error) => {
       sendJson(res, 500, { error: error instanceof Error ? error.message : "Internal server error." });
     });
   });
@@ -80,7 +84,8 @@ async function handleHttp(
   store: Store,
   config: ServerConfig,
   hub: RoomHub,
-  udpRelay?: UdpRelay
+  udpRelay?: UdpRelay,
+  connectionServer?: ConnectionServerAdmin
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -143,7 +148,8 @@ async function handleHttp(
     sendJson(res, 200, {
       connections: [
         ...hub.connections(),
-        ...(udpRelay?.connections() ?? [])
+        ...(udpRelay?.connections() ?? []),
+        ...((await connectionServer?.connections()) ?? [])
       ]
     });
     return;
@@ -155,7 +161,7 @@ async function handleHttp(
       return;
     }
     const body = await readJson<{
-      type?: "websocket" | "udp-session" | "sonobus-udp";
+      type?: "websocket" | "udp-session" | "sonobus-udp" | "sonobus-connection";
       roomId?: string;
       userId?: string;
       username?: string;
@@ -165,7 +171,7 @@ async function handleHttp(
       address?: string;
     }>(req);
     const udpKick =
-      body.type === "websocket"
+      body.type === "websocket" || body.type === "sonobus-connection"
         ? undefined
         : {
             ...body,
@@ -173,8 +179,9 @@ async function handleHttp(
           };
     const websocketKicked = !body.type || body.type === "websocket" ? hub.kick(body) : 0;
     const udpResult = udpKick ? udpRelay?.kick(udpKick) : undefined;
+    const connectionResult = body.type === "sonobus-connection" ? await connectionServer?.kick(toConnectionKick(body)) : undefined;
     sendJson(res, 200, {
-      kicked: websocketKicked + (udpResult?.kicked ?? 0)
+      kicked: websocketKicked + (udpResult?.kicked ?? 0) + (connectionResult?.kicked ?? 0)
     });
     return;
   }
@@ -184,12 +191,12 @@ async function handleHttp(
       sendJson(res, 403, { error: "Admin role required." });
       return;
     }
-    if (!udpRelay) {
+    if (!udpRelay && !connectionServer) {
       sendJson(res, 503, { error: "UDP relay is disabled." });
       return;
     }
     const body = await readJson<{
-      type?: "udp-session" | "sonobus-udp";
+      type?: "udp-session" | "sonobus-udp" | "sonobus-connection";
       roomId?: string;
       userId?: string;
       group?: string;
@@ -197,7 +204,19 @@ async function handleHttp(
       address?: string;
       ttlSeconds?: number;
     }>(req);
-    sendJson(res, 200, udpRelay.ban(body));
+    if (body.type === "sonobus-connection") {
+      if (!connectionServer) {
+        sendJson(res, 503, { error: "SonoBus connection server admin is disabled." });
+        return;
+      }
+      sendJson(res, 200, await connectionServer.ban(toConnectionBan(body)));
+      return;
+    }
+    if (!udpRelay) {
+      sendJson(res, 503, { error: "UDP relay is disabled." });
+      return;
+    }
+    sendJson(res, 200, udpRelay.ban(toUdpBan(body)));
     return;
   }
 
@@ -206,11 +225,11 @@ async function handleHttp(
       sendJson(res, 403, { error: "Admin role required." });
       return;
     }
-    if (!udpRelay) {
+    if (!udpRelay && !connectionServer) {
       sendJson(res, 503, { error: "UDP relay is disabled." });
       return;
     }
-    sendJson(res, 200, { bans: udpRelay.listBans() });
+    sendJson(res, 200, { bans: [...(udpRelay?.listBans() ?? []), ...((await connectionServer?.listBans()) ?? [])] });
     return;
   }
 
@@ -219,20 +238,31 @@ async function handleHttp(
       sendJson(res, 403, { error: "Admin role required." });
       return;
     }
-    if (!udpRelay) {
+    if (!udpRelay && !connectionServer) {
       sendJson(res, 503, { error: "UDP relay is disabled." });
       return;
     }
     const body = await readJson<{
       id?: string;
-      type?: "udp-session" | "sonobus-udp";
+      type?: "udp-session" | "sonobus-udp" | "sonobus-connection";
       roomId?: string;
       userId?: string;
       group?: string;
       user?: string;
       address?: string;
     }>(req);
-    sendJson(res, 200, udpRelay.unban(body));
+    if (body.type === "sonobus-connection" || (body.id && !udpRelay?.listBans().some((ban) => ban.id === body.id))) {
+      const result = await connectionServer?.unban(toConnectionUnban(body));
+      if (result) {
+        sendJson(res, 200, result);
+        return;
+      }
+    }
+    if (!udpRelay) {
+      sendJson(res, 503, { error: "UDP relay is disabled." });
+      return;
+    }
+    sendJson(res, 200, udpRelay.unban(toUdpUnban(body)));
     return;
   }
 
@@ -313,6 +343,49 @@ function authenticate(req: IncomingMessage, config: ServerConfig): TokenClaims |
   } catch {
     return undefined;
   }
+}
+
+function toConnectionKick(body: { group?: string; user?: string; address?: string }) {
+  return compact({ type: "sonobus-connection" as const, group: body.group, user: body.user, address: body.address });
+}
+
+function toConnectionBan(body: { group?: string; user?: string; address?: string; ttlSeconds?: number }) {
+  return compact({ ...toConnectionKick(body), ttlSeconds: body.ttlSeconds });
+}
+
+function toConnectionUnban(body: { id?: string; group?: string; user?: string; address?: string }) {
+  if (body.id) {
+    return { id: body.id };
+  }
+  return compact({ id: body.id, ...toConnectionKick(body) });
+}
+
+function toUdpBan(body: { type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string; ttlSeconds?: number }) {
+  return {
+    type: body.type === "udp-session" ? "udp-session" as const : "sonobus-udp" as const,
+    roomId: body.roomId,
+    userId: body.userId,
+    group: body.group,
+    user: body.user,
+    address: body.address,
+    ttlSeconds: body.ttlSeconds
+  };
+}
+
+function toUdpUnban(body: { id?: string; type?: "udp-session" | "sonobus-udp" | "sonobus-connection"; roomId?: string; userId?: string; group?: string; user?: string; address?: string }) {
+  return {
+    id: body.id,
+    type: body.type === "udp-session" ? "udp-session" as const : "sonobus-udp" as const,
+    roomId: body.roomId,
+    userId: body.userId,
+    group: body.group,
+    user: body.user,
+    address: body.address
+  };
+}
+
+function compact<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {

@@ -22,10 +22,24 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-lossless_audio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lossless_audio}
       MAX_BYTES_PER_SECOND_PER_CLIENT: ${MAX_BYTES_PER_SECOND_PER_CLIENT:-52428800}
       UDP_RELAY_PORT: ${UDP_RELAY_PORT:-9000}
+      CONNECTION_SERVER_ADMIN_URL: http://connection-server:18098
     ports:
       - "${UDP_RELAY_PORT:-9000}:${UDP_RELAY_PORT:-9000}/udp"
     depends_on:
       - postgres
+      - connection-server
+
+  connection-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.connection-server
+    restart: unless-stopped
+    environment:
+      CONNECTION_SERVER_PORT: ${CONNECTION_SERVER_PORT:-10998}
+      CONNECTION_SERVER_ADMIN_PORT: 18098
+    ports:
+      - "${CONNECTION_SERVER_PORT:-10998}:${CONNECTION_SERVER_PORT:-10998}/tcp"
+      - "${CONNECTION_SERVER_PORT:-10998}:${CONNECTION_SERVER_PORT:-10998}/udp"
 
   caddy:
     image: caddy:2.8-alpine

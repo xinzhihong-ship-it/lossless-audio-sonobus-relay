@@ -80,6 +80,26 @@ lossless-audio-server-linux-docker.tar.gz
 scp lossless-audio-server-linux-docker.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
 ```
 
+如果你不是从 GitHub Actions 下载部署包，而是在本机源码目录直接打包，使用：
+
+```bash
+cd "<你的项目目录>"
+COPYFILE_DISABLE=1 tar -czf /tmp/lossless-audio.tar.gz \
+  deploy docs packages tools package.json package-lock.json tsconfig.base.json README.md \
+  sonobus/deps/aoo
+scp /tmp/lossless-audio.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
+```
+
+服务器上解压这个本地源码包时使用：
+
+```bash
+sudo mkdir -p /opt/lossless-audio
+sudo tar -xzf /home/ubuntu/lossless-audio.tar.gz -C /opt/lossless-audio
+sudo chown -R ubuntu:ubuntu /opt/lossless-audio
+cd /opt/lossless-audio/deploy
+docker compose up -d --build
+```
+
 第一次连接会提示：
 
 ```text
@@ -154,6 +174,7 @@ POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
 POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
 MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
 UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
+CONNECTION_SERVER_PORT=10998 # SonoBus Connection Server 端口；云安全组必须放行 TCP/UDP 10998
 ```
 
 把 `PUBLIC_DOMAIN` 改成你的域名：
@@ -178,6 +199,7 @@ POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
 POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
 MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
 UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
+CONNECTION_SERVER_PORT=10998 # SonoBus Connection Server 端口；云安全组必须放行 TCP/UDP 10998
 ```
 
 IP 模式下 HTTP API 地址是：
@@ -191,6 +213,19 @@ SonoBus relay 地址是：
 ```text
 <你的服务器IP>:9000
 ```
+
+SonoBus Connection Server 地址是：
+
+```text
+<你的服务器IP>:10998
+```
+
+服务器安全组至少放行：
+
+- TCP `80`：Web 管理页面和 HTTP API。
+- UDP `9000`：SonoBus relay 音频中继。
+- TCP `10998`：SonoBus Connection Server 控制连接。
+- UDP `10998`：SonoBus Connection Server NAT 探测。
 
 不要把真实 IP 写到公开 README、截图、Issue 或论坛帖子里。
 
@@ -226,12 +261,15 @@ Ctrl + X
 | `ADMIN_PASSWORD` | 服务器管理员登录密码 |
 | `POSTGRES_PASSWORD` | 数据库内部密码，不是用户登录密码 |
 | `JWT_SECRET` | 登录 token 签名密钥，不是用户登录密码 |
+| `UDP_RELAY_PORT` | SonoBus 音频中继端口，默认 UDP 9000 |
+| `CONNECTION_SERVER_PORT` | SonoBus 房间发现/成员管理端口，默认 TCP/UDP 10998 |
 
 注意：
 
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` 不会自动变成 SonoBus 的 Group Password。
 - SonoBus 的 `Group Password` 是 SonoBus 房间密码，在 SonoBus 客户端连接页面里单独填写。
-- SonoBus 的 `Relay Server` 目前只用来转发 UDP 音频包，不会校验 `ADMIN_PASSWORD`。
+- SonoBus 的 `Relay Server` 只用来转发 UDP 音频包，不会校验 `ADMIN_PASSWORD`。
+- 要让 Web 管理页面真正看到并踢出 SonoBus 房间成员，客户端必须把 `Connection Server` 填成 `<你的服务器IP或域名>:10998`，不能继续用默认 `aoo.sonobus.net`。
 - 修改 `.env` 里的 `ADMIN_PASSWORD` 后，需要重启服务才会生效。
 
 重启命令：
@@ -516,6 +554,7 @@ PUBLIC_DOMAIN=https://your-server.example.com
 - 云安全组是否放行 UDP `9000`。
 - `.env` 里的 `UDP_RELAY_PORT` 是否是 `9000`。
 - SonoBus 里的 `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
+- SonoBus 里的 `Connection Server` 是否填写 `<你的服务器IP或域名>:10998`。
 - 两边是否都勾选 `Use Relay`。
 
 ### 延迟很大

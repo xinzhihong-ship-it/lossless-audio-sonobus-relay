@@ -63,11 +63,18 @@ curl -s http://127.0.0.1:8080/admin/connections \
 
 如果你使用的是域名或公网 HTTP 地址，把上面的 `http://127.0.0.1:8080` 换成 `http://<你的服务器IP或域名>` 或 `https://<你的域名>`。
 
-返回里常见三种连接：
+返回里常见连接：
 
 ```json
 {
   "connections": [
+    {
+      "type": "sonobus-connection",
+      "group": "band",
+      "user": "alice",
+      "address": "198.51.100.20",
+      "port": 53000
+    },
     {
       "type": "sonobus-udp",
       "group": "band",
@@ -82,7 +89,7 @@ curl -s http://127.0.0.1:8080/admin/connections \
 
 字段意思：
 
-- `type`：连接类型。`sonobus-udp` 是 SonoBus 桌面版/插件使用公网中继时的连接。
+- `type`：连接类型。`sonobus-connection` 是自己的 SonoBus Connection Server 里的房间成员；`sonobus-udp` 是 relay 音频中继看到的 UDP 心跳。
 - `group`：SonoBus 群组名。
 - `user`：SonoBus 用户名。
 - `address`：对方公网出口 IP。
@@ -97,7 +104,7 @@ curl -s http://127.0.0.1:8080/admin/connections \
 curl -s http://127.0.0.1:8080/admin/connections/kick \
   -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"type":"sonobus-udp","group":"<群组名>","user":"<用户名>"}'
+  -d '{"type":"sonobus-connection","group":"<群组名>","user":"<用户名>"}'
 ```
 
 示例：
@@ -106,7 +113,7 @@ curl -s http://127.0.0.1:8080/admin/connections/kick \
 curl -s http://127.0.0.1:8080/admin/connections/kick \
   -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"type":"sonobus-udp","group":"band","user":"alice"}'
+  -d '{"type":"sonobus-connection","group":"band","user":"alice"}'
 ```
 
 返回：
@@ -115,7 +122,7 @@ curl -s http://127.0.0.1:8080/admin/connections/kick \
 {"kicked":1}
 ```
 
-注意：UDP 没有真正的长连接。只踢出会把服务器记住的这个用户删除；如果对方客户端继续自动发包，可能会重新出现。要“不让它加入”，请用下面的封禁。
+注意：如果对方 SonoBus 客户端仍然使用默认 `aoo.sonobus.net`，这里踢不到它。必须让客户端的 `Connection Server` 填 `<你的服务器IP或域名>:10998`。
 
 ## 4. 踢出并封禁 1 小时
 
@@ -125,7 +132,7 @@ curl -s http://127.0.0.1:8080/admin/connections/kick \
 curl -s http://127.0.0.1:8080/admin/bans \
   -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"type":"sonobus-udp","group":"<群组名>","user":"<用户名>","ttlSeconds":3600}'
+  -d '{"type":"sonobus-connection","group":"<群组名>","user":"<用户名>","ttlSeconds":3600}'
 ```
 
 按 IP 封禁：

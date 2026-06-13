@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <vector>
 #include <random>
+#include <mutex>
 
 namespace aoo {
 namespace net {
@@ -119,6 +120,7 @@ private:
 };
 
 class server final : public iserver {
+    friend class client_endpoint;
 public:
     enum class error {
         none,
@@ -156,6 +158,17 @@ public:
 
     int32_t handle_events(aoo_eventhandler fn, void *user) override;
 
+    int32_t get_state_json(char *buffer, int32_t size) override;
+
+    int32_t kick(const char *group, const char *user, const char *address) override;
+
+    int32_t ban(const char *group, const char *user, const char *address,
+                int32_t ttl_seconds, char *buffer, int32_t size) override;
+
+    int32_t get_bans_json(char *buffer, int32_t size) override;
+
+    int32_t unban(const char *id, const char *group, const char *user, const char *address) override;
+
     std::shared_ptr<user> get_user(const std::string& name,
                                    const std::string& pwd, error& e);
 
@@ -184,6 +197,14 @@ public:
 
 
 private:
+    struct ban_record {
+        std::string id;
+        std::string group;
+        std::string user;
+        std::string address;
+        int64_t expires_at = 0;
+    };
+
     int tcpsocket_;
     int udpsocket_;
 #ifdef _WIN32
@@ -193,6 +214,8 @@ private:
     std::vector<std::unique_ptr<client_endpoint>> clients_;
     user_list users_;
     group_list groups_;
+    std::vector<ban_record> bans_;
+    mutable std::recursive_mutex admin_mutex_;
     // queues
     lockfree::queue<std::unique_ptr<icommand>> commands_;
     lockfree::queue<std::unique_ptr<ievent>> events_;
@@ -222,6 +245,13 @@ private:
                             const ip_address& addr);
 
     void signal();
+
+    std::string state_json_locked() const;
+    std::string bans_json_locked() const;
+    int kick_locked(const char *group, const char *user, const char *address);
+    bool is_banned_locked(const std::string& group, const std::string& user, const std::string& address) const;
+    void prune_bans_locked();
+    static int32_t copy_json_result(const std::string& json, char *buffer, int32_t size);
 
     /*/////////////////// events //////////////////////*/
 

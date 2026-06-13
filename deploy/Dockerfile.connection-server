@@ -1,0 +1,30 @@
+FROM debian:bookworm-slim AS build
+WORKDIR /src
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends g++ ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY sonobus/deps/aoo ./sonobus/deps/aoo
+COPY tools/connection-server ./tools/connection-server
+RUN g++ -std=c++17 -O2 -pthread \
+  -Isonobus/deps/aoo/lib \
+  -Isonobus/deps/aoo/lib/src \
+  -Isonobus/deps/aoo/deps \
+  tools/connection-server/main.cpp \
+  sonobus/deps/aoo/lib/src/server.cpp \
+  sonobus/deps/aoo/lib/src/client.cpp \
+  sonobus/deps/aoo/lib/src/common.cpp \
+  sonobus/deps/aoo/lib/src/net_utils.cpp \
+  sonobus/deps/aoo/lib/src/time.cpp \
+  sonobus/deps/aoo/lib/src/sync.cpp \
+  sonobus/deps/aoo/lib/src/codec_pcm.cpp \
+  -x c++ sonobus/deps/aoo/deps/md5/md5.c -x none \
+  sonobus/deps/aoo/deps/oscpack/osc/OscOutboundPacketStream.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscPrintReceivedElements.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscReceivedElements.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscTypes.cpp \
+  -o /usr/local/bin/sonobus-connection-server
+
+FROM debian:bookworm-slim AS runtime
+COPY --from=build /usr/local/bin/sonobus-connection-server /usr/local/bin/sonobus-connection-server
+EXPOSE 10998/tcp 10998/udp 18098/tcp
+CMD ["/usr/local/bin/sonobus-connection-server"]

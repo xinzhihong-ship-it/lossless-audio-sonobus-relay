@@ -5,6 +5,7 @@ import dgram from "node:dgram";
 import WebSocket from "ws";
 import { decodeRelayPacket, encodeAudioFrame, encodeRelayPacket } from "@lossless-audio/protocol";
 import { createApp } from "./app.js";
+import type { ConnectionServerAdmin } from "./connectionServerAdmin.js";
 import { MemoryStore } from "./store.js";
 
 test("ensureAdmin updates an existing admin password from config", async () => {
@@ -328,6 +329,102 @@ test("admin can list, kick, and ban native SonoBus UDP peers", async () => {
     await app.close();
   }
 });
+
+test("admin controls include SonoBus connection server users", async () => {
+  const connectionServer = new FakeConnectionServerAdmin();
+  connectionServer.connectionsList = [
+    {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      address: "203.0.113.9",
+      port: 32000,
+      connectedAt: "2026-06-13T10:00:00.000Z",
+      lastSeenAt: "2026-06-13T10:01:00.000Z"
+    }
+  ];
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    connectionServer
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+
+    const listed = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.deepEqual(listed.connections.find((connection) => connection.type === "sonobus-connection"), connectionServer.connectionsList[0]);
+
+    const kickResult = await post<{ kicked: number }>(baseUrl, "/admin/connections/kick", adminToken, {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice"
+    });
+    assert.equal(kickResult.kicked, 1);
+    assert.deepEqual(connectionServer.lastKick, { type: "sonobus-connection", group: "band", user: "alice" });
+
+    const banResult = await post<{ banned: number; expiresAt: string }>(baseUrl, "/admin/bans", adminToken, {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      ttlSeconds: 60
+    });
+    assert.equal(banResult.banned, 1);
+    assert.equal(connectionServer.lastBan?.type, "sonobus-connection");
+
+    const bans = await get<{ bans: Array<{ id: string; type: string; group?: string; user?: string }> }>(baseUrl, "/admin/bans", adminToken);
+    assert.deepEqual(bans.bans, connectionServer.bansList);
+
+    const unbanResult = await post<{ removed: number }>(baseUrl, "/admin/bans/remove", adminToken, { id: "ban-1" });
+    assert.equal(unbanResult.removed, 1);
+    assert.deepEqual(connectionServer.lastUnban, { id: "ban-1" });
+  } finally {
+    await app.close();
+  }
+});
+
+class FakeConnectionServerAdmin implements ConnectionServerAdmin {
+  connectionsList: Awaited<ReturnType<ConnectionServerAdmin["connections"]>> = [];
+  bansList = [{ id: "ban-1", type: "sonobus-connection" as const, group: "band", user: "alice", expiresAt: "2026-06-13T10:02:00.000Z" }];
+  lastKick?: unknown;
+  lastBan?: { type?: string };
+  lastUnban?: unknown;
+
+  async connections() {
+    return this.connectionsList;
+  }
+
+  async kick(request: unknown) {
+    this.lastKick = request;
+    return { kicked: 1 };
+  }
+
+  async ban(request: { type?: string }) {
+    this.lastBan = request;
+    return { banned: 1, expiresAt: "2026-06-13T10:02:00.000Z" };
+  }
+
+  async listBans() {
+    return this.bansList;
+  }
+
+  async unban(request: unknown) {
+    this.lastUnban = request;
+    return { removed: 1 };
+  }
+}
 
 async function login(baseUrl: string, username: string, password: string): Promise<string> {
   const response = await fetch(`${baseUrl}/auth/login`, {

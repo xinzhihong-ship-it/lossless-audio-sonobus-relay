@@ -4,7 +4,7 @@
 
 ## 项目来源
 
-客户端基于 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。原版 SonoBus 已经支持 Windows、macOS、Linux、Standalone、VST3、AU、LV2 和 DAW/机架加载。本项目在原版能力上增加 `Use Relay` / `Relay Server`，让没有公网 IP 的用户也可以通过自己的 Linux 公网服务器中继音频。
+客户端基于 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。原版 SonoBus 已经支持 Windows、macOS、Linux、Standalone、VST3、AU、LV2 和 DAW/机架加载。本项目在原版能力上增加 `Use Relay` / `Relay Server`，并在 Linux 服务端加入自己的 SonoBus Connection Server，让没有公网 IP 的用户也可以通过自己的 Linux 公网服务器中继音频。
 
 relay 只转发音频包，不混音、不转码、不重采样。
 
@@ -118,30 +118,35 @@ LV2:  ~/.lv2/
 
 客户端没有公网 IP、不能端口映射、公司/家庭 NAT 较复杂时，启用 relay。
 
-注意：服务器 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是给 HTTP/API 管理用的，不是 SonoBus 的登录密码。SonoBus 客户端连接时主要填写 `Group Name`、自己的用户名、可选的 `Group Password`，以及本项目新增的 `Relay Server`。
+注意：服务器 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是给 HTTP/API 管理用的，不是 SonoBus 的登录密码。SonoBus 客户端连接时主要填写 `Group Name`、自己的用户名、可选的 `Group Password`、`Connection Server`，以及本项目新增的 `Relay Server`。
 
 在 SonoBus 连接页面：
 
 1. 填写 Group Name。
 2. 填写 Your Displayed Name。
-3. `Connection Server` 可以继续用 SonoBus 默认值。
+3. `Connection Server` 填自己的服务器：
 4. 勾选 `Use Relay`。
 5. `Relay Server` 填自己的服务器：
 
 ```text
-<你的服务器IP或域名>:9000
+Connection Server: <你的服务器IP或域名>:10998
+Relay Server: <你的服务器IP或域名>:9000
 ```
 
 示例：
 
 ```text
-your-server.example.com:9000
-203.0.113.10:9000
+Connection Server: your-server.example.com:10998
+Relay Server: your-server.example.com:9000
+Connection Server: 203.0.113.10:10998
+Relay Server: 203.0.113.10:9000
 ```
 
 `203.0.113.10` 是文档示例地址，不是实际服务器。
 
-两端或多人必须进入同一个 SonoBus group，并填写同一个 relay server。用户名不要重复。
+两端或多人必须进入同一个 SonoBus group，并填写同一个 connection server 和 relay server。用户名不要重复。
+
+如果继续使用默认 `aoo.sonobus.net`，音频 relay 仍可工作，但 Linux Web 管理页面不能真正把用户从 SonoBus 房间踢出或封禁。
 
 ## 6. 命令行启动示例
 
@@ -151,6 +156,7 @@ your-server.example.com:9000
 SonoBus \
   --group test-room \
   --username alice \
+  --connectionserver <你的服务器IP或域名>:10998 \
   --relay-server <你的服务器IP或域名>:9000
 ```
 
@@ -160,10 +166,9 @@ SonoBus \
 SonoBus \
   --group test-room \
   --username bob \
+  --connectionserver <你的服务器IP或域名>:10998 \
   --relay-server <你的服务器IP或域名>:9000
 ```
-
-通常不需要手动设置 `--connectionserver`。如果你自己另外部署了 SonoBus/AOO connection server，再按自己的地址填写。
 
 ## 7. 降低延迟建议
 

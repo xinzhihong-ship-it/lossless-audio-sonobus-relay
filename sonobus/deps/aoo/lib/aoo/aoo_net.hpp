@@ -61,6 +61,17 @@ public:
     // will call the event handler function one or more times
     virtual int32_t handle_events(aoo_eventhandler fn, void *user) = 0;
 
+    virtual int32_t get_state_json(char *buffer, int32_t size) = 0;
+
+    virtual int32_t kick(const char *group, const char *user, const char *address) = 0;
+
+    virtual int32_t ban(const char *group, const char *user, const char *address,
+                        int32_t ttl_seconds, char *buffer, int32_t size) = 0;
+
+    virtual int32_t get_bans_json(char *buffer, int32_t size) = 0;
+
+    virtual int32_t unban(const char *id, const char *group, const char *user, const char *address) = 0;
+
     // LATER add methods to add/remove users and groups
     // and set/get server options, group options and user options
     

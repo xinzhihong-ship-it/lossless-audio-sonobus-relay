@@ -194,6 +194,17 @@ AOO_API int32_t aoonet_server_events_available(aoonet_server *server);
 AOO_API int32_t aoonet_server_handle_events(aoonet_server *server,
                                             aoo_eventhandler fn, void *user);
 
+AOO_API int32_t aoonet_server_get_state_json(aoonet_server *server, char *buffer, int32_t size);
+
+AOO_API int32_t aoonet_server_kick(aoonet_server *server, const char *group, const char *user, const char *address);
+
+AOO_API int32_t aoonet_server_ban(aoonet_server *server, const char *group, const char *user, const char *address,
+                                  int32_t ttl_seconds, char *buffer, int32_t size);
+
+AOO_API int32_t aoonet_server_get_bans_json(aoonet_server *server, char *buffer, int32_t size);
+
+AOO_API int32_t aoonet_server_unban(aoonet_server *server, const char *id, const char *group, const char *user, const char *address);
+
 // LATER add methods to add/remove users and groups
 // and set/get server options, group options and user options
 
