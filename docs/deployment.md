@@ -1,109 +1,142 @@
 # Linux 公网服务器部署
 
-本文档是从零开始的 Linux 部署说明。文档不会包含任何真实服务器 IP；请把示例中的 `<你的服务器IP>`、`<你的域名>`、`your-server.example.com` 替换成自己的服务器地址。
+本文档从零开始写，适合第一次接触 Linux、Docker、FinalShell 的用户。
 
-## 1. 部署目标
+文档里不会写真实服务器 IP。请把 `<你的服务器IP>`、`<你的域名>`、`<你的管理员密码>` 换成自己的信息。
 
-部署完成后，服务器会提供两类能力：
+## 1. 部署后有什么
 
-- HTTP/HTTPS 服务：登录、房间、健康检查、WebSocket API。
-- UDP relay 服务：SonoBus 客户端没有公网 IP 时，通过服务器转发音频包。
+部署完成后，服务器会运行 4 个服务：
 
-客户端不需要公网 IP，不需要端口映射，只要能主动访问你的服务器即可。
+| 服务名 | 中文意思 | 作用 |
+| --- | --- | --- |
+| `postgres` | PostgreSQL 数据库 | 保存管理员账号、房间、封禁列表 |
+| `server` | Node.js 管理服务 | Web 后台、API、UDP relay |
+| `connection-server` | SonoBus 连接服务器 | 让 SonoBus 用户进入同一个 group，并支持踢出/封禁 |
+| `caddy` | HTTP/HTTPS 反向代理 | 对外提供 Web 管理页面 |
 
-## 2. 服务器要求
+端口：
 
-推荐配置：
+| 端口 | 协议 | 中文说明 |
+| --- | --- | --- |
+| `80` | TCP | HTTP 网页访问 |
+| `443` | TCP | HTTPS 网页访问，有域名时使用 |
+| `9000` | UDP | Relay Server，中继音频包 |
+| `10998` | TCP/UDP | Connection Server，SonoBus 连接服务器 |
+
+## 2. 服务器准备
+
+推荐：
 
 | 项目 | 建议 |
 | --- | --- |
-| 系统 | Ubuntu 22.04 / Ubuntu 24.04 |
+| 系统 | Ubuntu 22.04 或 Ubuntu 24.04 |
 | CPU | 2 核以上 |
 | 内存 | 2 GB 以上 |
-| 带宽 | 按人数和 PCM 码率估算，建议 10 Mbps 起步 |
-| 软件 | Docker、Docker Compose |
+| 带宽 | 10 Mbps 起步，人多要更高 |
+| 软件 | Docker 已安装 |
 | 网络 | 有公网 IP |
 
-必须开放的端口：
+云服务器安全组必须放行：
 
-| 端口 | 协议 | 用途 |
-| --- | --- | --- |
-| `80` | TCP | HTTP / Caddy 自动申请证书 |
-| `443` | TCP | HTTPS API / WebSocket |
-| `9000` | UDP | SonoBus 音频 relay |
+```text
+TCP 80
+TCP 443
+UDP 9000
+TCP 10998
+UDP 10998
+```
 
-如果你没有域名，也可以先只用公网 IP 测试。IP 测试模式使用 HTTP，不自动申请 TLS 证书。
+英文解释：
 
-## 3. 从 GitHub 下载部署包
+| 英文 | 中文意思 |
+| --- | --- |
+| `Security Group` | 云服务器安全组 |
+| `Inbound Rule` | 入站规则 |
+| `TCP` | 常见网页/连接协议 |
+| `UDP` | 实时音频包常用协议 |
 
-进入项目 GitHub 页面：
+## 3. 下载服务器部署包
 
-1. 点击 `Actions`。
-2. 左侧选择 `Build Linux Server Bundle`。
-3. 点击最新的绿色成功记录。
-4. 页面底部下载 Artifact：`lossless-audio-server-linux-docker`。
-5. 解压后会得到：
+打开：
+
+```text
+https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions
+```
+
+下载：
+
+```text
+lossless-audio-server-linux-docker
+```
+
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `Actions` | GitHub 自动构建页面 |
+| `Artifact` | 构建产物，下载包 |
+| `Download` | 下载 |
+| `success` | 构建成功 |
+
+下载后你会得到一个压缩包，里面通常有：
 
 ```text
 lossless-audio-server-linux-docker.tar.gz
 ```
 
-这个压缩包就是 Linux 服务器部署包。
-
-## 4. 上传到服务器
-
-### 方法 A：FinalShell 上传
-
-1. 用 FinalShell 连接服务器。
-2. 登录用户可以是 `ubuntu` 或 `root`。
-3. 打开服务器目录 `/home/ubuntu` 或 `/root`。
-4. 把 `lossless-audio-server-linux-docker.tar.gz` 拖到 FinalShell 文件窗口。
-5. 如果拖拽无效，使用 FinalShell 的上传按钮。
-
-上传后在服务器执行：
-
-```bash
-ls -lh
-```
-
-确认能看到：
-
-```text
-lossless-audio-server-linux-docker.tar.gz
-```
-
-### 方法 B：Mac/Linux 用 scp 上传
-
-在自己电脑终端执行：
-
-```bash
-scp lossless-audio-server-linux-docker.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
-```
-
-如果你不是从 GitHub Actions 下载部署包，而是在本机源码目录直接打包，使用：
+如果你是开发者，也可以从源码目录自己打包：
 
 ```bash
 cd "<你的项目目录>"
 COPYFILE_DISABLE=1 tar -czf /tmp/lossless-audio.tar.gz \
   deploy docs packages tools package.json package-lock.json tsconfig.base.json README.md \
   sonobus/deps/aoo
+```
+
+## 4. 上传到 Linux 服务器
+
+### 方法 A：FinalShell 上传
+
+1. 打开 FinalShell。
+2. 连接你的 Linux 服务器。
+3. 登录用户一般是 `ubuntu` 或 `root`。
+4. 左侧/右侧文件面板进入 `/home/ubuntu`。
+5. 把压缩包拖进去。
+6. 如果拖拽无效，用 FinalShell 的上传按钮。
+
+上传后，在 SSH 命令窗口执行：
+
+```bash
+ls -lh /home/ubuntu
+```
+
+确认能看到压缩包。
+
+### 方法 B：Mac/Linux 终端上传
+
+如果你从 GitHub 下载的是服务器部署包：
+
+```bash
+scp lossless-audio-server-linux-docker.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
+```
+
+如果你从源码目录自己打包的是 `/tmp/lossless-audio.tar.gz`：
+
+```bash
 scp /tmp/lossless-audio.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
 ```
 
-服务器上解压这个本地源码包时使用：
-
-```bash
-sudo mkdir -p /opt/lossless-audio
-sudo tar -xzf /home/ubuntu/lossless-audio.tar.gz -C /opt/lossless-audio
-sudo chown -R ubuntu:ubuntu /opt/lossless-audio
-cd /opt/lossless-audio/deploy
-docker compose up -d --build
-```
-
-第一次连接会提示：
+第一次连接可能提示：
 
 ```text
 Are you sure you want to continue connecting (yes/no/[fingerprint])?
+```
+
+中文意思：
+
+```text
+这是第一次连接这台服务器，是否信任？
 ```
 
 输入：
@@ -116,36 +149,51 @@ yes
 
 ## 5. 解压到 /opt/lossless-audio
 
-SSH 登录服务器后执行：
+SSH 登录服务器，执行：
 
 ```bash
-sudo mkdir -p /opt/lossless-audio
-sudo tar -xzf ~/lossless-audio-server-linux-docker.tar.gz -C /opt/lossless-audio --strip-components=1
-sudo chown -R "$USER":"$USER" /opt/lossless-audio
+sudo -i
+mkdir -p /opt/lossless-audio
+```
+
+如果你上传的是 GitHub Actions 下载的服务器包：
+
+```bash
+tar -xzf /home/ubuntu/lossless-audio-server-linux-docker.tar.gz -C /opt/lossless-audio --strip-components=1
+```
+
+如果你上传的是自己源码打包的包：
+
+```bash
+tar -xzf /home/ubuntu/lossless-audio.tar.gz -C /opt/lossless-audio
+```
+
+设置权限：
+
+```bash
+chown -R ubuntu:ubuntu /opt/lossless-audio
+```
+
+检查文件：
+
+```bash
 cd /opt/lossless-audio
 ls
 ```
 
-正常应该看到：
+应该看到：
 
 ```text
-deploy  docs  package.json  package-lock.json  packages  README.md  tsconfig.base.json
+deploy  docs  packages  tools  package.json  package-lock.json  README.md
 ```
+
+## 6. 创建 .env 配置
 
 进入部署目录：
 
 ```bash
 cd /opt/lossless-audio/deploy
-ls
 ```
-
-正常应该看到：
-
-```text
-Caddyfile  Dockerfile.server  docker-compose.yml
-```
-
-## 6. 创建 .env 配置
 
 复制示例配置：
 
@@ -154,90 +202,77 @@ cp .env.example .env
 nano .env
 ```
 
-如果提示没有 `.env.example`，说明部署包不完整，可以手动创建：
+英文解释：
 
-```bash
-nano .env
-```
+| 英文 | 中文意思 |
+| --- | --- |
+| `.env` | 环境配置文件 |
+| `nano` | Linux 里的文本编辑器 |
+| `PUBLIC_DOMAIN` | 对外访问域名或监听地址 |
+| `JWT_SECRET` | 登录令牌签名密钥 |
+| `ADMIN_USERNAME` | Web 管理员用户名 |
+| `ADMIN_PASSWORD` | Web 管理员密码 |
+| `POSTGRES_PASSWORD` | 数据库密码 |
+| `UDP_RELAY_PORT` | UDP 音频中继端口 |
+| `CONNECTION_SERVER_PORT` | SonoBus 连接服务器端口 |
 
-### 有域名的配置
+### 没有域名，只用公网 IP
 
-如果你有域名，例如 `audio.example.com`，并且域名 A 记录已经指向服务器公网 IP：
-
-```dotenv
-PUBLIC_DOMAIN=your-server.example.com # 你的域名；不要写 https://
-JWT_SECRET=replace-with-a-long-random-secret # JWT 登录签名密钥；必须改成长随机字符串
-ADMIN_USERNAME=admin # 管理员用户名；用于登录和创建用户
-ADMIN_PASSWORD=replace-with-a-strong-password # 管理员密码；必须改成强密码
-POSTGRES_DB=lossless_audio # PostgreSQL 数据库名；一般不用改
-POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
-POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
-MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
-UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
-CONNECTION_SERVER_PORT=10998 # SonoBus Connection Server 端口；云安全组必须放行 TCP/UDP 10998
-```
-
-把 `PUBLIC_DOMAIN` 改成你的域名：
+把 `.env` 写成这样：
 
 ```dotenv
-PUBLIC_DOMAIN=<你的域名> # 例如 audio.example.com；不要写 https://
+PUBLIC_DOMAIN=:80 # 没有域名时这样写，表示只监听 HTTP 80 端口
+JWT_SECRET=请改成一串很长的随机字符 # 登录令牌签名密钥，必须改
+ADMIN_USERNAME=admin # Web 管理后台用户名
+ADMIN_PASSWORD=请改成你的管理员密码 # Web 管理后台密码
+POSTGRES_DB=lossless_audio # 数据库名，一般不用改
+POSTGRES_USER=lossless_audio # 数据库用户名，一般不用改
+POSTGRES_PASSWORD=请改成数据库密码 # PostgreSQL 数据库密码，必须改
+MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒，默认 50 MB/s
+UDP_RELAY_PORT=9000 # Relay Server 音频中继端口，云安全组放行 UDP 9000
+CONNECTION_SERVER_PORT=10998 # Connection Server 端口，云安全组放行 TCP/UDP 10998
 ```
 
-有域名时，Caddy 会自动申请 HTTPS 证书。
+访问地址：
 
-### 没有域名，只有公网 IP 的配置
+```text
+http://<你的服务器IP>/admin
+```
 
-如果你暂时没有域名，只想用公网 IP 测试：
+### 有域名
+
+如果你有域名，并且域名已经解析到服务器 IP：
 
 ```dotenv
-PUBLIC_DOMAIN=:80 # 没有域名时使用 IP 测试；Caddy 只监听 HTTP 80
-JWT_SECRET=replace-with-a-long-random-secret # JWT 登录签名密钥；必须改成长随机字符串
-ADMIN_USERNAME=admin # 管理员用户名；用于登录和创建用户
-ADMIN_PASSWORD=replace-with-a-strong-password # 管理员密码；必须改成强密码
-POSTGRES_DB=lossless_audio # PostgreSQL 数据库名；一般不用改
-POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
-POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
-MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
-UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
-CONNECTION_SERVER_PORT=10998 # SonoBus Connection Server 端口；云安全组必须放行 TCP/UDP 10998
+PUBLIC_DOMAIN=<你的域名> # 例如 audio.example.com，不要写 https://
+JWT_SECRET=请改成一串很长的随机字符 # 登录令牌签名密钥，必须改
+ADMIN_USERNAME=admin # Web 管理后台用户名
+ADMIN_PASSWORD=请改成你的管理员密码 # Web 管理后台密码
+POSTGRES_DB=lossless_audio # 数据库名，一般不用改
+POSTGRES_USER=lossless_audio # 数据库用户名，一般不用改
+POSTGRES_PASSWORD=请改成数据库密码 # PostgreSQL 数据库密码，必须改
+MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒，默认 50 MB/s
+UDP_RELAY_PORT=9000 # Relay Server 音频中继端口，云安全组放行 UDP 9000
+CONNECTION_SERVER_PORT=10998 # Connection Server 端口，云安全组放行 TCP/UDP 10998
 ```
 
-IP 模式下 HTTP API 地址是：
+访问地址：
 
 ```text
-http://<你的服务器IP>
+https://<你的域名>/admin
 ```
 
-SonoBus relay 地址是：
-
-```text
-<你的服务器IP>:9000
-```
-
-SonoBus Connection Server 地址是：
-
-```text
-<你的服务器IP>:10998
-```
-
-服务器安全组至少放行：
-
-- TCP `80`：Web 管理页面和 HTTP API。
-- UDP `9000`：SonoBus relay 音频中继。
-- TCP `10998`：SonoBus Connection Server 控制连接。
-- UDP `10998`：SonoBus Connection Server NAT 探测。
-
-不要把真实 IP 写到公开 README、截图、Issue 或论坛帖子里。
+Caddy 会自动申请 HTTPS 证书。
 
 ### 生成随机密钥
 
-可以用下面命令生成 `JWT_SECRET`：
+生成 `JWT_SECRET`：
 
 ```bash
 openssl rand -hex 32
 ```
 
-数据库密码也建议生成一个随机值：
+生成数据库密码：
 
 ```bash
 openssl rand -base64 24
@@ -251,44 +286,28 @@ Enter
 Ctrl + X
 ```
 
-### 这些账号密码分别管什么
+## 7. 第一次启动
 
-`.env` 里的账号密码只用于服务器 HTTP/API：
+在 `/opt/lossless-audio/deploy` 执行：
 
-| 配置 | 作用 |
+```bash
+docker compose up -d --build
+```
+
+英文解释：
+
+| 英文 | 中文意思 |
 | --- | --- |
-| `ADMIN_USERNAME` | 服务器管理员登录用户名 |
-| `ADMIN_PASSWORD` | 服务器管理员登录密码 |
-| `POSTGRES_PASSWORD` | 数据库内部密码，不是用户登录密码 |
-| `JWT_SECRET` | 登录 token 签名密钥，不是用户登录密码 |
-| `UDP_RELAY_PORT` | SonoBus 音频中继端口，默认 UDP 9000 |
-| `CONNECTION_SERVER_PORT` | SonoBus 房间发现/成员管理端口，默认 TCP/UDP 10998 |
+| `docker compose` | Docker 多容器管理命令 |
+| `up` | 启动服务 |
+| `-d` | 后台运行 |
+| `--build` | 重新构建镜像 |
 
-注意：
+第一次启动会比较慢，因为要下载镜像和编译 `connection-server`。
 
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 不会自动变成 SonoBus 的 Group Password。
-- SonoBus 的 `Group Password` 是 SonoBus 房间密码，在 SonoBus 客户端连接页面里单独填写。
-- SonoBus 的 `Relay Server` 只用来转发 UDP 音频包，不会校验 `ADMIN_PASSWORD`。
-- 要让 Web 管理页面真正看到并踢出 SonoBus 房间成员，客户端必须把 `Connection Server` 填成 `<你的服务器IP或域名>:10998`，不能继续用默认 `aoo.sonobus.net`。
-- 修改 `.env` 里的 `ADMIN_PASSWORD` 后，需要重启服务才会生效。
+如果在腾讯云等国内服务器上，`apt-get` 下载慢是正常现象。后续只更新 Web/后台时，不需要重编译 `connection-server`。
 
-重启命令：
-
-```bash
-docker compose up -d --build
-```
-
-新版服务启动时会同步 `.env` 里的管理员密码。如果数据库里已经存在同名管理员，也会把密码更新成 `.env` 当前值。
-
-## 7. 启动服务
-
-在 `/opt/lossless-audio/deploy` 目录执行：
-
-```bash
-docker compose up -d --build
-```
-
-第一次启动会下载镜像并编译服务端，可能需要几分钟。
+## 8. 检查服务
 
 查看容器状态：
 
@@ -296,46 +315,19 @@ docker compose up -d --build
 docker compose ps
 ```
 
-正常会看到类似：
+正常应该看到：
 
 ```text
-postgres   Up
-server     Up
-caddy      Up
+postgres            Up
+server              Up
+connection-server   Up
+caddy               Up
 ```
 
-查看日志：
+测试健康检查：
 
 ```bash
-docker compose logs -f
-```
-
-只看服务端日志：
-
-```bash
-docker compose logs -f server
-```
-
-退出日志查看：
-
-```text
-Ctrl + C
-```
-
-## 8. 检查是否部署成功
-
-### 有域名
-
-在服务器上测试：
-
-```bash
-curl http://127.0.0.1/health
-```
-
-在自己电脑上测试：
-
-```bash
-curl https://<你的域名>/health
+curl -i http://127.0.0.1/health
 ```
 
 正常返回：
@@ -344,96 +336,103 @@ curl https://<你的域名>/health
 {"ok":true}
 ```
 
-### 没有域名，只有公网 IP
-
-在服务器上测试：
+测试 Web 管理页面是否是最新版：
 
 ```bash
-curl http://127.0.0.1/health
+curl -s http://127.0.0.1/admin | grep -E "数据库|Docker 重启|永久|自定义"
 ```
 
-在自己电脑上测试：
-
-```bash
-curl http://<你的服务器IP>/health
-```
-
-正常返回：
-
-```json
-{"ok":true}
-```
-
-注意：当前 compose 默认不把服务端 `8080` 直接暴露到公网，HTTP 访问走 Caddy 的 `80` 或 `443`。
-
-## 9. 云服务器安全组
-
-除了服务器里的 Docker，云厂商控制台也必须放行端口。
-
-在腾讯云、阿里云、华为云、AWS 等安全组里添加：
+正常能看到类似：
 
 ```text
-TCP 80
-TCP 443
-UDP 9000
+封禁保存在数据库里，Docker 重启后会自动恢复。
 ```
 
-如果只放行了 TCP，没有放行 UDP `9000`，页面健康检查可能正常，但 SonoBus 音频 relay 会失败或收不到声音。
-
-Ubuntu 自带防火墙如果开启了，也要放行：
-
-```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 9000/udp
-sudo ufw status
-```
-
-如果 `ufw status` 显示 inactive，说明本机防火墙没有启用，只需要检查云安全组。
-
-## 10. 客户端怎么填写
-
-### SonoBus 客户端
-
-在 SonoBus 连接页面：
-
-1. 填写 `Group Name`。
-2. 填写 `Your Displayed Name`。
-3. `Connection Server` 可以继续使用默认值。
-4. 勾选 `Use Relay`。
-5. `Relay Server` 填自己的服务器。
-
-有域名：
-
-```text
-<你的域名>:9000
-```
+## 9. 浏览器打开后台
 
 没有域名：
 
 ```text
-<你的服务器IP>:9000
+http://<你的服务器IP>/admin
 ```
-
-多人要填同一个 `Group Name` 和同一个 `Relay Server`，用户名不要重复。
-
-### Electron/WebSocket MVP 客户端
 
 有域名：
 
 ```text
-https://<你的域名>
+https://<你的域名>/admin
 ```
 
-没有域名：
+页面字段：
+
+| 页面文字 | 中文说明 |
+| --- | --- |
+| `服务器地址` | 自动填当前打开的地址 |
+| `管理员账号` | `.env` 里的 `ADMIN_USERNAME` |
+| `管理员密码` | `.env` 里的 `ADMIN_PASSWORD` |
+| `在线连接` | 当前连接的人 |
+| `封禁列表` | 当前被封禁的人 |
+
+浏览器如果显示旧页面，强制刷新：
 
 ```text
-http://<你的服务器IP>
+Mac: Command + Shift + R
+Windows: Ctrl + F5
 ```
 
-实际音乐/DAW 使用优先使用 SonoBus 改造版。
+## 10. 客户端填写
 
-## 11. 常用维护命令
+SonoBus 客户端里填写：
+
+```text
+Connection Server（连接服务器）: <你的服务器IP或域名>:10998
+Use Relay（使用中继）: 勾选
+Relay Server（中继服务器）: <你的服务器IP或域名>:9000
+```
+
+如果改过 `UDP_RELAY_PORT`，把 `9000` 换成你的端口。
+
+多人要填同一个：
+
+- `Group Name`（房间名）
+- `Connection Server`（连接服务器）
+- `Relay Server`（中继服务器）
+- `Group Password`（房间密码，如果有）
+
+## 11. 更新服务器
+
+如果只是更新 Web 后台、数据库逻辑、Node 服务端：
+
+```bash
+cd /opt/lossless-audio/deploy
+docker compose build --no-cache server
+docker compose up -d --no-deps server
+```
+
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `--no-cache` | 不用旧缓存，重新构建 |
+| `--no-deps` | 不重启依赖服务 |
+| `server` | 只更新 Node 服务端 |
+
+如果改了 SonoBus connection-server C++ 代码，才需要：
+
+```bash
+docker compose build --no-cache connection-server
+docker compose up -d --no-deps connection-server
+docker compose restart server
+```
+
+不要每次都执行：
+
+```bash
+docker compose up -d --build
+```
+
+因为它可能重新编译 `connection-server`，国内服务器会很慢。
+
+## 12. 常用命令
 
 进入部署目录：
 
@@ -441,31 +440,7 @@ http://<你的服务器IP>
 cd /opt/lossless-audio/deploy
 ```
 
-启动：
-
-```bash
-docker compose up -d
-```
-
-停止：
-
-```bash
-docker compose down
-```
-
-重启：
-
-```bash
-docker compose restart
-```
-
-更新代码后重新构建：
-
-```bash
-docker compose up -d --build
-```
-
-查看容器：
+查看状态：
 
 ```bash
 docker compose ps
@@ -474,131 +449,150 @@ docker compose ps
 查看日志：
 
 ```bash
-docker compose logs -f
+docker compose logs -f server
 ```
 
-查看磁盘：
+重启 Node 服务：
 
 ```bash
-df -h
+docker compose restart server
 ```
 
-清理未使用 Docker 缓存：
+重启全部服务：
 
 ```bash
-docker system prune -f
+docker compose restart
 ```
 
-## 12. 常见问题
+停止全部服务：
 
-### 提示 `/opt/lossless-audio: Is a directory`
+```bash
+docker compose down
+```
 
-这是因为你把目录当命令执行了。进入目录要用 `cd`：
+注意：`docker compose down` 不会删除数据库卷；不要随便加 `-v`。
+
+## 13. 测试封禁持久化
+
+1. 打开 Web 后台。
+2. 封禁一个在线用户。
+3. 重启 Node 服务：
+
+```bash
+docker compose restart server
+```
+
+4. 刷新 Web 后台。
+5. 封禁列表应该还在。
+6. 点击 `解除`。
+7. 再重启：
+
+```bash
+docker compose restart server
+```
+
+8. 封禁列表不应该再回来。
+
+这说明数据库持久化和解封删除都正常。
+
+## 14. 常见问题
+
+### `/opt/lossless-audio: Is a directory`
+
+中文意思：这是一个目录，不是命令。
+
+进入目录要用：
 
 ```bash
 cd /opt/lossless-audio
 ```
 
-### `docker compose` 命令不存在
+### `curl http://127.0.0.1:8080/health` 不通
 
-先确认 Docker 是否安装：
-
-```bash
-docker --version
-docker compose version
-```
-
-如果没有安装 Docker Compose 插件，需要安装：
+当前服务端 `8080` 在 Docker 内部，不一定映射到主机。请用：
 
 ```bash
-sudo apt update
-sudo apt install -y docker-compose-plugin
+curl http://127.0.0.1/health
 ```
 
-### `curl http://<你的服务器IP>/health` 访问不了
+### 浏览器自动跳 HTTPS
+
+Chrome 可能缓存了 HTTPS。没有域名时请手动输入：
+
+```text
+http://<你的服务器IP>/admin
+```
+
+如果还跳，试试无痕窗口，或清除该站点的 HSTS/缓存。
+
+### 页面正常，但 SonoBus 没声音
 
 检查：
-
-```bash
-docker compose ps
-docker compose logs caddy
-docker compose logs server
-```
-
-然后确认云安全组放行了 TCP `80`。
-
-### 有域名但 HTTPS 证书申请失败
-
-检查：
-
-- 域名 A 记录是否指向当前服务器公网 IP。
-- 云安全组是否放行 TCP `80` 和 `443`。
-- `.env` 里的 `PUBLIC_DOMAIN` 是否只写域名，不要写 `https://`。
-
-正确：
-
-```dotenv
-PUBLIC_DOMAIN=your-server.example.com
-```
-
-错误：
-
-```dotenv
-PUBLIC_DOMAIN=https://your-server.example.com
-```
-
-### SonoBus 能进房但没有声音
-
-优先检查 UDP `9000`：
 
 - 云安全组是否放行 UDP `9000`。
-- `.env` 里的 `UDP_RELAY_PORT` 是否是 `9000`。
-- SonoBus 里的 `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
-- SonoBus 里的 `Connection Server` 是否填写 `<你的服务器IP或域名>:10998`。
-- 两边是否都勾选 `Use Relay`。
+- 客户端是否勾选 `Use Relay`。
+- `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
+- 双方是否同一个 `Group Name`。
 
-### 延迟很大
+### Web 看不到在线用户
 
-relay 比 P2P 直连多一跳。延迟主要取决于网络：
+客户端必须填写：
 
-- 服务器是否离双方太远。
-- 双方是否使用 Wi-Fi。
-- Ping 是否过高。
-- 是否使用了过大的音频 buffer。
-- 是否使用了 `PCM 32 bit float` 导致带宽压力过大。
+```text
+Connection Server: <你的服务器IP或域名>:10998
+```
 
-建议：
+如果继续使用默认 `aoo.sonobus.net`，Web 后台无法真正看到和管理房间成员。
 
-- Windows 使用 ASIO。
-- macOS 使用 CoreAudio。
-- 音频 buffer 先试 `128` 或 `256`。
-- Send Quality 先试 `PCM 24 bit`。
-- 服务器尽量选择离所有用户都近的地区。
+### 踢出没用
 
-## 13. 带宽估算
+踢出只是断开当前连接，客户端可能自动重连。
 
-服务器是中继模式，房间里每个发送者的音频会转发给其他所有人。
+要阻止回来，请使用：
 
-示例：48kHz / 24bit / stereo PCM：
+```text
+封禁
+```
+
+### 解封后又回来封禁
+
+新版已经修复：解除封禁会从数据库删除。
+
+检查是否是新版：
+
+```bash
+curl -s http://127.0.0.1/admin | grep "封禁保存在数据库"
+```
+
+有输出才是新版。
+
+## 15. 带宽估算
+
+48kHz / 24bit / stereo PCM 一路大约：
 
 ```text
 48000 * 3 bytes * 2 channels = 288000 B/s
 ```
 
-约等于 `2.3 Mbps` 一路上行音频。
+约等于：
 
-如果 4 人同时发送，每个人都接收其他 3 路，服务器出口约：
+```text
+2.3 Mbps
+```
+
+4 人同时发送，服务器出口大约：
 
 ```text
 4 * 3 * 2.3 Mbps = 27.6 Mbps
 ```
 
-还不含 UDP/IP 协议开销。
+实际还会有协议开销。
 
-## 14. 安全建议
+## 16. 安全建议
 
-- 使用强 `JWT_SECRET` 和管理员密码。
-- 不要提交 `deploy/.env`。
-- 不要在公开 README、截图、Issue 或论坛帖子里暴露真实服务器 IP。
-- 第一版不开放注册，只有管理员能创建用户。
-- `MAX_BYTES_PER_SECOND_PER_CLIENT` 用于限制单客户端上行，防止误配置打满带宽。
+- 不要把 `.env` 上传到 GitHub。
+- 不要公开真实服务器 IP、管理员密码、数据库密码。
+- `JWT_SECRET` 必须使用长随机字符串。
+- `ADMIN_PASSWORD` 必须用强密码。
+- 只给可信的人 Web 后台账号。
+- 云安全组只开放需要的端口。

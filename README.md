@@ -1,92 +1,142 @@
-# Lossless Audio Relay
+# Lossless Audio SonoBus Relay
 
-基于 SonoBus 改造的跨平台无损实时音频传输项目，支持 Windows、macOS、Linux 桌面端和 DAW 插件形态，并增加公网 UDP relay。客户端不需要公网 IP，也不需要路由器端口映射；所有没有直连条件的客户端可以主动连接自己的 Linux 公网服务器，由服务器转发音频包。
+基于 SonoBus 改造的跨平台无损实时音频传输项目。它包含：
 
-> 文档不会写入任何真实服务器 IP。部署和客户端配置时，请把示例里的 `<你的服务器IP或域名>` 替换成你自己的公网服务器地址。
+- SonoBus 改造版客户端：Windows、macOS、Linux。
+- DAW 插件：VST3、AU、LV2，按平台支持不同格式。
+- Linux 公网服务器：Connection Server（连接服务器）、Relay Server（中继服务器）、Web 管理后台。
+- 无公网 IP 支持：客户端主动连接公网服务器，不需要端口映射。
 
-## 基于 SonoBus 改造
+本文档不会写真实服务器 IP。部署和使用时，请把 `<你的服务器IP或域名>` 换成你自己的公网服务器地址。
 
-本项目的专业音频客户端基于开源项目 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。SonoBus 已经提供成熟的跨平台实时音频能力、Standalone 桌面程序、VST3/AU/LV2 插件形态、DAW/机架加载能力和 PCM/Opus 音频传输能力。
+## 项目基于 SonoBus 改造
 
-本项目没有重写 SonoBus 的音频引擎，而是在其基础上增加公网 relay 能力：
+本项目的音频客户端基于开源项目 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。
 
-- 保留 SonoBus 原有音频采集、播放、插件、抖动缓冲、PCM/Opus 传输和 UI。
-- 新增 `Use Relay` / `Relay Server` 配置。
-- 新增 `SBR1` UDP relay envelope。
-- 当客户端没有公网 IP 或 P2P 不稳定时，可把音频包发到自己的 Linux 公网服务器中继。
-- relay 服务器只转发 UDP payload，不解码、不混音、不转码、不重采样。
+SonoBus 原本已经支持：
 
-SonoBus 是 GPL-3.0 with App Store exception 项目。分发本项目修改版客户端时，应同时提供对应源码，并保留上游版权和许可证说明。
+- Standalone（独立桌面程序）
+- VST3（Windows/macOS/Linux 插件）
+- AU（macOS 插件）
+- LV2（macOS/Linux 插件）
+- DAW/机架加载
+- PCM/Opus 实时音频传输
 
-## 核心特性
+本项目没有重写音频引擎，而是在 SonoBus 原有能力上增加：
 
-- SonoBus 桌面端：Windows、macOS、Linux。
-- SonoBus 插件：Windows VST3、Windows VST3 Instrument、macOS VST3、macOS AU、macOS LV2、Linux VST3、Linux LV2。
-- Windows ASIO 构建：GitHub Actions 自动下载 Steinberg ASIO SDK 并启用 ASIO。
-- Node.js 服务端：JWT 登录、管理员建号、房间 API、WebSocket 音频中继、UDP relay。
-- Bit-perfect 传输语义：服务端不混音、不转码、不重采样，二进制音频帧原样转发给房间内其他客户端。
-- SonoBus relay：`sonobus/` 中的 fork 增加 `Use Relay` / `Relay Server`，也支持 `--relay-server <host:port>` 参数。
-- SonoBus Connection Server：Linux 服务端内置自己的 AOO/SonoBus 连接服务器，默认 `10998`，Web 管理页面可查看、踢出、封禁使用该连接服务器的房间成员。
-- Docker Compose 部署：Postgres + 服务端 + Caddy 反代。
+- 自建 Connection Server（连接服务器），默认端口 `10998`。
+- 自建 Relay Server（中继服务器），默认 UDP 端口 `9000`。
+- `Use Relay`（使用中继）开关。
+- `Relay Server`（中继服务器地址）输入。
+- Linux Web 管理后台，可查看在线用户、踢出、封禁、解除封禁。
+- 封禁持久化到 PostgreSQL（数据库），Docker 重启后会自动恢复。
 
-## 下载成品
+服务器只转发音频包，不混音、不转码、不重采样。
 
-构建包在 GitHub Actions 的 Artifacts 里下载：
+## 下载
 
-1. 打开 GitHub 项目页面。
-2. 点击 `Actions`。
-3. 选择对应 workflow。
-4. 点击最新的绿色成功记录。
-5. 在页面底部 `Artifacts` 下载。
+打开 GitHub Actions 下载页：
 
-可下载的包：
+[Actions 下载页](https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions)
 
-- `sonobus-windows-x64-asio`：Windows ASIO 版，推荐 Windows 使用。
-- `sonobus-windows-x64`：Windows 普通版。
-- `sonobus-macos-universal`：macOS universal 版，含 app 和插件。
-- `sonobus-linux-x64`：Linux x64 版，含 standalone 和插件。
-- `lossless-audio-server-linux-docker`：Linux 服务器 Docker 部署包。
+当前只保留最新版构建包，旧构建包已经清理。
 
-更详细的安装、下载和使用说明见 [docs/download-and-use.md](docs/download-and-use.md)。
+下载包名称：
 
-## 用户怎么填服务器
+| Artifact（构建产物） | 中文说明 | 推荐对象 |
+| --- | --- | --- |
+| `lossless-audio-server-linux-docker` | Linux 服务器 Docker 部署包 | 部署服务器 |
+| `sonobus-windows-x64-asio` | Windows ASIO 版客户端和 VST3 插件 | Windows 专业声卡用户，推荐 |
+| `sonobus-windows-x64` | Windows 普通版客户端和 VST3 插件 | Windows 普通用户 |
+| `sonobus-macos-universal` | macOS 通用版客户端和插件 | Mac 用户 |
+| `sonobus-linux-x64` | Linux 客户端和插件 | Linux 用户 |
 
-不要把某个人的真实服务器写进源码或文档。客户端只需要用户自己填写：
+详细下载和客户端使用见：
+
+- [docs/download-and-use.md](docs/download-and-use.md)
+
+## Linux 部署
+
+新手按这个文档一步一步做：
+
+- [docs/deployment.md](docs/deployment.md)
+
+部署完成后，浏览器打开：
 
 ```text
-Connection Server: <你的服务器IP或域名>:10998
-Relay Server: <你的服务器IP或域名>:<你的中继端口>
+http://<你的服务器IP或域名>/admin
 ```
 
-示例：
+如果你配置了域名和 HTTPS：
 
 ```text
-Connection Server: your-server.example.com:10998
-Relay Server: your-server.example.com:9000
-Connection Server: 203.0.113.10:10998
-Relay Server: 203.0.113.10:9000
+https://<你的域名>/admin
 ```
 
-其中 `203.0.113.10` 是文档专用示例地址，不是实际可用服务器。
-`9000` 是默认中继端口；如果部署时改过 `UDP_RELAY_PORT`，这里填写你自己的中继端口。
+## 客户端怎么填写
 
-SonoBus 里有两个容易混淆的地址：
+如果使用官方 SonoBus 服务器：
 
-- `Connection Server`：SonoBus 用来找同组用户的连接服务器。要让 Web 管理页面能真正踢出/封禁房间成员，必须填自己的服务器 `<你的服务器IP或域名>:10998`。
-- `Relay Server`：本项目新增的公网 UDP 中继服务器，填你自己的 Linux 公网服务器地址和 UDP 端口。
+- `Connection Server`（连接服务器）：保持默认。
+- `Use Relay`（使用中继）：不勾选。
 
-还有两个容易混淆的密码：
+如果使用自己的 Linux 公网服务器：
 
-- `.env` 里的 `ADMIN_PASSWORD`：服务器 HTTP/API 管理员密码，不是 SonoBus 房间密码。
-- SonoBus 里的 `Group Password`：SonoBus group 的可选房间密码，在客户端连接页面单独设置。
+```text
+Connection Server（连接服务器）: <你的服务器IP或域名>:10998
+Use Relay（使用中继）: 勾选
+Relay Server（中继服务器）: <你的服务器IP或域名>:9000
+```
 
-## 当前边界
+如果你在服务器 `.env` 里改过 `UDP_RELAY_PORT`，就把 `9000` 换成自己的中继端口。
 
-- relay 转发音频包，不做混音、不做转码、不做重采样。
-- relay 会比 P2P 直连多一跳，延迟取决于客户端到服务器、服务器到其他客户端的网络质量。
-- 如果 Ping 很高，例如 300ms 以上，软件无法把物理网络延迟变成低延迟。
-- 第一版推荐手动启用 `Use Relay`；自动判断 P2P 失败后切换 relay 可以继续迭代。
-- `packages/desktop` 是早期 Electron/Web Audio MVP，主要用于验证登录、房间和 WebSocket 中继。实际音乐/DAW 使用优先使用 `sonobus/` 里的 SonoBus fork。
+## Web 管理后台能做什么
+
+Web 管理后台地址：
+
+```text
+http://<你的服务器IP或域名>/admin
+```
+
+功能：
+
+- 查看在线连接。
+- 踢出当前用户。
+- 封禁 10 分钟、1 小时、1 天、自定义时间、永久封禁。
+- 解除封禁。
+- 封禁写入数据库，Docker 重启后仍然生效。
+- 解除封禁会从数据库删除，重启后不会再次恢复。
+
+详细管理说明见：
+
+- [docs/linux-admin.md](docs/linux-admin.md)
+
+## 常见英文词翻译
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `Actions` | GitHub 自动构建页面 |
+| `Artifact` | 构建产物，下载包 |
+| `Connection Server` | 连接服务器，用来发现同组用户 |
+| `Relay Server` | 中继服务器，用来转发音频包 |
+| `Use Relay` | 使用中继 |
+| `Group Name` | 房间名/群组名 |
+| `Your Displayed Name` | 你的显示名 |
+| `Group Password` | 房间密码，不是服务器管理员密码 |
+| `Standalone` | 独立桌面程序 |
+| `VST3/AU/LV2` | DAW 插件格式 |
+| `ASIO` | Windows 低延迟音频驱动 |
+| `Docker Compose` | Docker 多容器启动工具 |
+| `PostgreSQL` | 数据库 |
+| `Caddy` | HTTP/HTTPS 反向代理服务 |
+
+## 重要提醒
+
+- 不要把真实服务器 IP、管理员密码、数据库密码写进公开文档、截图、Issue 或论坛。
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是 Web 管理后台账号密码，不是 SonoBus 房间密码。
+- SonoBus `Group Password` 是房间密码，只在客户端里使用。
+- 要让 Web 后台真正踢出/封禁 SonoBus 房间成员，客户端必须使用你的 `Connection Server`：`<你的服务器IP或域名>:10998`。
+- 如果客户端继续使用默认 `aoo.sonobus.net`，Web 后台无法真正管理这些房间成员。
 
 ## 本地开发
 
@@ -94,25 +144,8 @@ SonoBus 里有两个容易混淆的地址：
 npm install
 npm run build
 npm test
-npm run dev:server
-npm run dev:desktop
 ```
 
-## 部署
+## 许可证
 
-复制 `deploy/.env.example` 为 `deploy/.env`，修改域名和密钥后：
-
-```bash
-cd deploy
-docker compose up -d --build
-```
-
-详见 [docs/deployment.md](docs/deployment.md)。
-
-## 文档
-
-- [下载和客户端使用](docs/download-and-use.md)
-- [Linux 服务器部署](docs/deployment.md)
-- [Linux 服务器管理：查看在线用户、踢出、封禁](docs/linux-admin.md)
-- [SonoBus relay 改造说明](docs/sonobus-fork-relay.md)
-- [中继改造路线](docs/sonobus-relay-plan.md)
+SonoBus 是 GPL-3.0 with App Store exception 项目。分发本项目修改版客户端时，需要保留上游版权和许可证说明，并提供对应源码。

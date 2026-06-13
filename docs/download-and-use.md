@@ -1,67 +1,120 @@
 # 下载和客户端使用
 
-本文档面向最终用户和部署者。所有服务器地址都使用占位示例，请用户填写自己的公网服务器 IP 或域名。
+本文档给普通用户看。所有服务器地址都用占位符，请把 `<你的服务器IP或域名>` 换成自己的公网服务器。
 
-## 项目来源
+## 1. 去哪里下载
 
-客户端基于 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。原版 SonoBus 已经支持 Windows、macOS、Linux、Standalone、VST3、AU、LV2 和 DAW/机架加载。本项目在原版能力上增加 `Use Relay` / `Relay Server`，并在 Linux 服务端加入自己的 SonoBus Connection Server，让没有公网 IP 的用户也可以通过自己的 Linux 公网服务器中继音频。
+打开 GitHub Actions 页面：
 
-relay 只转发音频包，不混音、不转码、不重采样。
+```text
+https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions
+```
 
-## 1. 下载软件
+页面里的英文说明：
 
-进入 GitHub 项目页面后：
-
-1. 点击 `Actions`。
-2. 在左侧选择需要的平台。
-3. 点击最新的绿色成功构建。
-4. 在页面底部 `Artifacts` 下载构建包。
-
-Artifacts 对应关系：
-
-| Artifact | 用途 |
+| 英文 | 中文意思 |
 | --- | --- |
-| `sonobus-windows-x64-asio` | Windows ASIO 版，推荐使用 |
-| `sonobus-windows-x64` | Windows 普通版 |
-| `sonobus-macos-universal` | macOS app、VST3、AU、LV2 |
-| `sonobus-linux-x64` | Linux standalone、VST3、LV2 |
-| `lossless-audio-server-linux-docker` | Linux 服务器 Docker 部署包 |
+| `Actions` | 自动构建页面 |
+| `Workflow` | 构建任务类型 |
+| `Run` | 某一次构建记录 |
+| `Artifacts` | 构建产物，下载包 |
+| `Download` | 下载 |
+| `completed / success` | 已完成 / 成功 |
 
-## 2. Windows 安装
+下载步骤：
 
-推荐下载 `sonobus-windows-x64-asio`。
+1. 打开 `Actions` 页面。
+2. 找最新的绿色成功记录。
+3. 点进去。
+4. 拉到页面底部。
+5. 找 `Artifacts`。
+6. 下载自己需要的包。
 
-解压后通常包含：
+当前只保留最新版构建包，旧构建包已经清理。也就是说，页面底部 `Artifacts`（构建产物）里只应该看到当前可下载的最新版服务器包和客户端包。
+
+## 2. 下载哪个包
+
+| 下载包名 | 中文说明 | 谁用 |
+| --- | --- | --- |
+| `sonobus-windows-x64-asio` | Windows ASIO 版 | Windows 专业声卡用户，推荐 |
+| `sonobus-windows-x64` | Windows 普通版 | Windows 普通用户 |
+| `sonobus-macos-universal` | macOS 通用版 | Mac 用户 |
+| `sonobus-linux-x64` | Linux x64 版 | Linux 用户 |
+| `lossless-audio-server-linux-docker` | Linux 服务器部署包 | 服务器管理员 |
+
+如果你是 Windows 用户，优先下载：
+
+```text
+sonobus-windows-x64-asio
+```
+
+如果 ASIO 版打不开或没有 ASIO 声卡，再用：
+
+```text
+sonobus-windows-x64
+```
+
+## 3. Windows 使用
+
+下载 `sonobus-windows-x64-asio` 后解压。
+
+常见文件：
 
 ```text
 SonoBus.exe
-SonoBus.vst3/
-SonoBusInstrument.vst3/
+SonoBus.vst3
+SonoBusInstrument.vst3
 ```
 
-Standalone 使用：
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `Standalone` | 独立桌面程序 |
+| `VST3` | DAW 插件格式 |
+| `Instrument` | 乐器插件版本 |
+| `ASIO` | Windows 低延迟音频驱动 |
+
+### 独立程序
 
 1. 双击 `SonoBus.exe`。
-2. 第一次启动如果 Windows 防火墙询问是否允许网络访问，请允许专用网络和公用网络。
-3. 打开音频设置，`Audio Device Type` 选择 `ASIO`。
-4. 选择声卡自带 ASIO 驱动；如果没有专业声卡，可以安装 ASIO4ALL。
+2. Windows 防火墙提示时，允许网络访问。
+3. 打开音频设置。
+4. `Audio Device Type`（音频设备类型）选择 `ASIO`。
+5. `Audio Input Device`（音频输入设备）选择你的声卡输入。
+6. `Audio Output Device`（音频输出设备）选择你的声卡输出。
 
-VST3 安装：
+### VST3 插件安装
 
-1. 把 `SonoBus.vst3` 和 `SonoBusInstrument.vst3` 复制到：
+把这些文件夹复制到：
 
 ```text
 C:\Program Files\Common Files\VST3\
 ```
 
-2. 打开 DAW，重新扫描 VST3 插件。
-3. 在音轨或机架里加载 SonoBus。
+复制内容：
 
-## 3. macOS 安装
+```text
+SonoBus.vst3
+SonoBusInstrument.vst3
+```
 
-推荐下载 `sonobus-macos-universal`。
+然后打开 DAW，执行重新扫描插件。
 
-解压后通常包含：
+常见 DAW 英文按钮：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `Rescan Plugins` | 重新扫描插件 |
+| `Plugin Manager` | 插件管理器 |
+| `VST3` | VST3 插件 |
+| `Insert` | 插入插件 |
+
+## 4. macOS 使用
+
+下载 `sonobus-macos-universal` 后解压。
+
+常见文件：
 
 ```text
 SonoBus.app
@@ -71,120 +124,224 @@ SonoBus.component
 SonoBus.lv2
 ```
 
-Standalone 使用：
+英文解释：
 
-1. 把 `SonoBus.app` 拖到 `Applications`。
-2. 第一次打开如果 macOS 安全提示拦截，请到 `系统设置 -> 隐私与安全性` 允许打开。
-3. 音频设备使用 CoreAudio，选择输入和输出设备。
+| 英文 | 中文意思 |
+| --- | --- |
+| `universal` | 同时支持 Intel Mac 和 Apple Silicon Mac |
+| `app` | Mac 应用程序 |
+| `component` | AU 插件 |
+| `LV2` | LV2 插件 |
+| `CoreAudio` | macOS 原生音频系统 |
 
-插件安装位置：
+### 独立程序
+
+1. 把 `SonoBus.app` 拖到 `Applications`（应用程序）。
+2. 第一次打开如果被 macOS 拦截：
+   - 打开 `系统设置`
+   - 进入 `隐私与安全性`
+   - 找到拦截提示
+   - 点击允许打开
+3. 进入 SonoBus 音频设置，选择输入和输出设备。
+
+### 插件安装位置
+
+VST3：
 
 ```text
-VST3: /Library/Audio/Plug-Ins/VST3/
-AU:   /Library/Audio/Plug-Ins/Components/
-LV2:  ~/Library/Audio/Plug-Ins/LV2/
+/Library/Audio/Plug-Ins/VST3/
 ```
 
-复制后重启 DAW 或重新扫描插件。
+AU：
 
-## 4. Linux 客户端安装
+```text
+/Library/Audio/Plug-Ins/Components/
+```
 
-推荐下载 `sonobus-linux-x64`。
+LV2：
 
-解压：
+```text
+~/Library/Audio/Plug-Ins/LV2/
+```
+
+复制后重启 DAW，或重新扫描插件。
+
+## 5. Linux 客户端使用
+
+下载 `sonobus-linux-x64` 后解压：
 
 ```bash
 tar -xzf sonobus-linux-x64.tar.gz
 cd linux-x64
 ```
 
-运行 standalone：
+运行独立程序：
 
 ```bash
 chmod +x SonoBus 2>/dev/null || chmod +x sonobus 2>/dev/null || true
 ./SonoBus 2>/dev/null || ./sonobus
 ```
 
-常见插件目录：
+插件目录：
 
 ```text
 VST3: ~/.vst3/
 LV2:  ~/.lv2/
 ```
 
-复制插件后重启 DAW 或重新扫描插件。
+## 6. 连接自己的服务器
 
-## 5. 启用公网 relay
+如果用户没有公网 IP，或者公司/家庭网络不能直连，就使用自建服务器中继。
 
-客户端没有公网 IP、不能端口映射、公司/家庭 NAT 较复杂时，启用 relay。
+SonoBus 连接页面常见字段：
 
-注意：服务器 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是给 HTTP/API 管理用的，不是 SonoBus 的登录密码。SonoBus 客户端连接时主要填写 `Group Name`、自己的用户名、可选的 `Group Password`、`Connection Server`，以及本项目新增的 `Relay Server`。
+| 英文 | 中文意思 | 应该填什么 |
+| --- | --- | --- |
+| `Group Name` | 房间名/群组名 | 多人填同一个 |
+| `Your Displayed Name` | 你的显示名 | 每个人不要重复 |
+| `Group Password` | 房间密码 | 可选，多人一致 |
+| `Connection Server` | 连接服务器 | `<你的服务器IP或域名>:10998` |
+| `Use Relay` | 使用中继 | 勾选 |
+| `Relay Server` | 中继服务器 | `<你的服务器IP或域名>:9000` |
 
-在 SonoBus 连接页面：
+自建服务器填写：
 
-1. 填写 Group Name。
-2. 填写 Your Displayed Name。
-3. 如果用官方服务器，`Connection Server` 保持默认，不勾选 `Use Relay`。
-4. 如果用自建服务器，`Connection Server` 填自己的服务器，并勾选 `Use Relay`。
-5. 勾选后 `Relay Server` 会自动使用同一台服务器；端口默认 `9000`，如果你的服务端改过 `UDP_RELAY_PORT`，把这里改成自己的中继端口。
+```text
+Connection Server（连接服务器）: <你的服务器IP或域名>:10998
+Use Relay（使用中继）: 勾选
+Relay Server（中继服务器）: <你的服务器IP或域名>:9000
+```
+
+如果服务器改过中继端口，把 `9000` 换成自己的 `UDP_RELAY_PORT`。
+
+多人必须一致：
+
+- 同一个 `Group Name`（房间名）
+- 同一个 `Connection Server`（连接服务器）
+- 同一个 `Relay Server`（中继服务器）
+- 如果填了 `Group Password`（房间密码），也必须一致
+
+用户名不要重复。
+
+## 7. 使用官方服务器
+
+如果你不想用自己的中继服务器，可以继续使用官方 SonoBus。
+
+这种情况下：
+
+- `Connection Server` 保持默认。
+- 不勾选 `Use Relay`。
+- 不填写 `Relay Server`。
+
+注意：如果继续使用官方服务器，自己的 Linux Web 管理后台无法踢出/封禁这些用户。
+
+## 8. Web 管理员密码和 SonoBus 房间密码不是一回事
+
+服务器 `.env` 里的：
+
+```text
+ADMIN_USERNAME
+ADMIN_PASSWORD
+```
+
+意思是：
+
+```text
+Web 管理后台账号
+Web 管理后台密码
+```
+
+它们不是 SonoBus 房间密码。
+
+SonoBus 里的：
+
+```text
+Group Password
+```
+
+意思是：
+
+```text
+房间密码
+```
+
+这两个系统互不相同。
+
+## 9. 降低延迟建议
+
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `Buffer Size` | 缓冲大小 |
+| `Jitter Buffer` | 抖动缓冲 |
+| `Send Quality` | 发送音质 |
+| `PCM 24 bit` | 24 位无损 PCM |
+| `PCM 32 bit float` | 32 位浮点 PCM |
+
+建议：
+
+- Windows 使用 ASIO。
+- Mac 使用 CoreAudio。
+- 尽量用有线网络。
+- `Buffer Size` 先试 `128` 或 `256`。
+- `Send Quality` 先试 `PCM 24 bit`。
+- 网络稳定后再尝试更低缓冲。
+- 如果 ping 很高，换更近的服务器。
+
+服务器中继会比 P2P 直连多一跳，这是物理网络决定的。
+
+## 10. 常见问题
+
+### Web 能打开，但 SonoBus 没声音
+
+检查：
+
+- 云服务器安全组是否放行 UDP `9000`。
+- SonoBus 是否勾选 `Use Relay`。
+- `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
+- 双方是否同一个 `Group Name`。
+
+### Web 里看不到在线用户
+
+要让 Web 后台看到 SonoBus 房间成员，客户端必须填写：
 
 ```text
 Connection Server: <你的服务器IP或域名>:10998
-Relay Server: <你的服务器IP或域名>:9000
 ```
 
-示例：
+如果还用默认 `aoo.sonobus.net`，Web 后台看不到真正房间成员。
+
+### 踢出后用户又回来了
+
+踢出只是断开当前连接。对方客户端会自动重连。
+
+要阻止回来，请用：
 
 ```text
-Connection Server: your-server.example.com:10998
-Relay Server: your-server.example.com:9000
-Connection Server: 203.0.113.10:10998
-Relay Server: 203.0.113.10:9000
+封禁
 ```
 
-`203.0.113.10` 是文档示例地址，不是实际服务器。
+封禁可以选择：
 
-两端或多人必须进入同一个 SonoBus group，并填写同一个 connection server 和 relay server。用户名不要重复。
+- 10 分钟
+- 1 小时
+- 1 天
+- 自定义
+- 永久
 
-如果继续使用默认 `aoo.sonobus.net`，音频 relay 仍可工作，但 Linux Web 管理页面不能真正把用户从 SonoBus 房间踢出或封禁。
+### 误封怎么办
 
-## 6. 命令行启动示例
+进入 Web 管理后台：
 
-如果需要命令行启动：
-
-```bash
-SonoBus \
-  --group test-room \
-  --username alice \
-  --relay-server <你的服务器IP或域名>:9000
+```text
+http://<你的服务器IP或域名>/admin
 ```
 
-另一台机器：
+在 `封禁列表` 里点击：
 
-```bash
-SonoBus \
-  --group test-room \
-  --username bob \
-  --relay-server <你的服务器IP或域名>:9000
+```text
+解除
 ```
 
-命令行只传 `--relay-server <你的服务器IP或域名>:<你的中继端口>` 即可，客户端会自动把 Connection Server 设为同一台服务器的 `10998` 端口。使用官方服务器时不要传 `--relay-server`。
-
-## 7. 降低延迟建议
-
-relay 比直连多一跳，延迟主要取决于网络路径。建议：
-
-- 服务器选择离所有用户都近的机房。
-- 优先使用有线网络。
-- Windows 使用 ASIO 驱动。
-- macOS 使用 CoreAudio，并把 buffer 调到 `128` 或 `256`。
-- Send Quality 优先试 `PCM 24 bit`，带宽足够再用 `PCM 32 bit float`。
-- Recv Jitter Buffer 先用 Auto；如果网络稳定，可手动试 `10ms` 到 `20ms`。
-- 如果 Ping 超过 `300ms`，实时演奏会明显慢，应该换更近的服务器或改善网络。
-
-## 8. 隐私和发布注意
-
-- 不要在 README、截图、Issue、论坛帖子里写真实服务器 IP。
-- 对外说明统一写 `<你的服务器IP或域名>:9000`。
-- 如果要演示，可以使用 `your-server.example.com:9000` 或 `203.0.113.10:9000` 这样的文档示例。
-- 不要把 `.env` 上传到 GitHub，里面有密码和密钥。
+解除后会从数据库删除，重启 Docker 后不会再恢复。
