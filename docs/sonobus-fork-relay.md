@@ -30,16 +30,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-启动改造版 SonoBus Standalone 时同时填写自己的 connection server 和 relay server：
+启动改造版 SonoBus Standalone 时只需要填写 relay server：
 
 ```bash
 SonoBus --group test-room \
   --username alice \
-  --connectionserver <你的服务器IP或域名>:10998 \
   --relay-server <你的服务器IP或域名>:9000
 ```
 
-另一端使用同一个 `--group`、同一个 `--connectionserver` 和同一个 `--relay-server`，用户名不同即可。
+客户端会自动把 Connection Server 设成同一台服务器的 `10998` 端口。另一端使用同一个 `--group` 和同一个 `--relay-server`，用户名不同即可。
 
 ## 图形界面使用
 
@@ -47,14 +46,14 @@ SonoBus --group test-room \
 
 1. 填写 `Group Name`。
 2. 填写 `Your Displayed Name`。
-3. `Connection Server` 填：
+3. 如果使用官方服务器，`Connection Server` 保持默认，不勾选 `Use Relay`。
+4. 如果使用自建服务器，`Connection Server` 填：
 
 ```text
 <你的服务器IP或域名>:10998
 ```
 
-4. 勾选 `Use Relay`。
-5. `Relay Server` 填：
+5. 勾选 `Use Relay` 后，`Relay Server` 会自动使用同一台服务器的 `9000` 端口：
 
 ```text
 <你的服务器IP或域名>:9000

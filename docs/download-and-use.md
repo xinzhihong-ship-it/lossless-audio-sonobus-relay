@@ -124,9 +124,9 @@ LV2:  ~/.lv2/
 
 1. 填写 Group Name。
 2. 填写 Your Displayed Name。
-3. `Connection Server` 填自己的服务器：
-4. 勾选 `Use Relay`。
-5. `Relay Server` 填自己的服务器：
+3. 如果用官方服务器，`Connection Server` 保持默认，不勾选 `Use Relay`。
+4. 如果用自建服务器，`Connection Server` 填自己的服务器，并勾选 `Use Relay`。
+5. 勾选后 `Relay Server` 会自动使用同一台服务器的 `9000` 端口。
 
 ```text
 Connection Server: <你的服务器IP或域名>:10998
@@ -156,7 +156,6 @@ Relay Server: 203.0.113.10:9000
 SonoBus \
   --group test-room \
   --username alice \
-  --connectionserver <你的服务器IP或域名>:10998 \
   --relay-server <你的服务器IP或域名>:9000
 ```
 
@@ -166,9 +165,10 @@ SonoBus \
 SonoBus \
   --group test-room \
   --username bob \
-  --connectionserver <你的服务器IP或域名>:10998 \
   --relay-server <你的服务器IP或域名>:9000
 ```
+
+命令行只传 `--relay-server <你的服务器IP或域名>:9000` 即可，客户端会自动把 Connection Server 设为同一台服务器的 `10998` 端口。使用官方服务器时不要传 `--relay-server`。
 
 ## 7. 降低延迟建议
 

@@ -238,7 +238,7 @@ publicGroupsListModel(this)
 
     mRelayServerEnabledButton = std::make_unique<ToggleButton>(TRANS("Use Relay"));
     mRelayServerEnabledButton->setTitle(TRANS("Use Relay Server"));
-    mRelayServerEnabledButton->setTooltip(TRANS("Send audio through your public relay server when clients do not have public IP addresses."));
+    mRelayServerEnabledButton->setTooltip(TRANS("Use your own public server for both the connection server and audio relay. Leave this off when using the official connection server."));
     mRelayServerEnabledButton->addListener(this);
     mRelayServerEnabledButton->setClickingTogglesState(true);
 
@@ -249,7 +249,7 @@ publicGroupsListModel(this)
     mRelayServerEditor->setTitle(TRANS("Relay Server"));
     mRelayServerEditor->setFont(Font(14 * SonoLookAndFeel::getFontScale()));
     mRelayServerEditor->setTextToShowWhenEmpty(TRANS("host:9000"), Colour(0x44ffffff));
-    mRelayServerEditor->setTooltip(TRANS("Public UDP relay server host:port. Audio payloads are forwarded without decoding or mixing."));
+    mRelayServerEditor->setTooltip(TRANS("Public UDP relay server host:port. When relay is enabled this follows the connection server host and uses port 9000."));
     configEditor(mRelayServerEditor.get());
 
     mMainStatusLabel = std::make_unique<Label>("mainstat", "");
@@ -893,6 +893,8 @@ void ConnectView::publicGroupLogin()
 
 void ConnectView::applyRelayServerFields()
 {
+    syncRelayServerFromConnectionServer();
+
     String hostport = mRelayServerEditor->getText().trim();
     StringArray toks = StringArray::fromTokens(hostport, ":", "");
     String host;
@@ -912,9 +914,51 @@ void ConnectView::applyRelayServerFields()
     mRelayServerEditor->setColour(TextEditor::backgroundColourId, valid ? Colour(0xff050505) : Colour(0xff880000));
     mRelayServerEditor->repaint();
     mServerAudioInfoLabel->setText(enabled
-        ? TRANS("Relay mode sends peer audio packets through your public relay server. The relay forwards packet payloads only and does not decode, mix, transcode, or resample audio.")
+        ? TRANS("Relay mode uses your own server for both group connection and audio relay. Audio payloads are forwarded only and are not decoded, mixed, transcoded, or resampled.")
         : TRANS("The connection server is only used to help users find each other, no audio passes through it. All audio is sent directly between users (peer to peer)."),
         dontSendNotification);
+}
+
+void ConnectView::parseServerHostPort(const String& hostport, String& host, int& port, int defaultPort) const
+{
+    StringArray toks = StringArray::fromTokens(hostport.trim(), ":", "");
+    host = toks.size() >= 1 ? toks[0].trim() : String();
+    port = defaultPort;
+    if (toks.size() >= 2) {
+        const int parsedPort = toks[1].trim().getIntValue();
+        if (parsedPort > 0) {
+            port = parsedPort;
+        }
+    }
+}
+
+void ConnectView::syncRelayServerFromConnectionServer()
+{
+    String connectionHost;
+    int connectionPort = DEFAULT_SERVER_PORT;
+    parseServerHostPort(mServerHostEditor->getText(), connectionHost, connectionPort, DEFAULT_SERVER_PORT);
+
+    const bool usingDefaultConnectionServer = connectionHost.isEmpty() || connectionHost == DEFAULT_SERVER_HOST;
+    if (usingDefaultConnectionServer) {
+        if (mRelayServerEnabledButton->getToggleState()) {
+            mRelayServerEnabledButton->setToggleState(false, dontSendNotification);
+        }
+        return;
+    }
+
+    if (!mRelayServerEnabledButton->getToggleState()) {
+        return;
+    }
+
+    String relayHost;
+    int relayPort = 0;
+    parseServerHostPort(mRelayServerEditor->getText(), relayHost, relayPort, 0);
+
+    if (relayHost != connectionHost || relayPort <= 0) {
+        String relayHostPort;
+        relayHostPort << connectionHost << ":9000";
+        mRelayServerEditor->setText(relayHostPort, false);
+    }
 }
 
 void ConnectView::updateRelayServerFieldsFromProcessor()
@@ -1005,6 +1049,9 @@ void ConnectView::textEditorReturnKeyPressed (TextEditor& ed)
     if (&ed == mPublicServerHostEditor.get() || &ed == mPublicServerUsernameEditor.get()) {
         publicGroupLogin();
     }
+    else if (&ed == mServerHostEditor.get()) {
+        applyRelayServerFields();
+    }
     else if (&ed == mRelayServerEditor.get()) {
         applyRelayServerFields();
     }
@@ -1047,6 +1094,9 @@ void ConnectView::textEditorTextChanged (TextEditor& ed)
         // try to set the current username, it will fail if we are connected, no big deal
         processor.setCurrentUsername(ed.getText().trim());
     }
+    else if (&ed == mServerHostEditor.get()) {
+        applyRelayServerFields();
+    }
     else if (&ed == mRelayServerEditor.get()) {
         applyRelayServerFields();
     }
@@ -1058,6 +1108,9 @@ void ConnectView::textEditorFocusLost (TextEditor& ed)
     // only one we care about live is udp port
     if (&ed == mPublicServerHostEditor.get() || &ed == mPublicServerUsernameEditor.get()) {
         publicGroupLogin();
+    }
+    else if (&ed == mServerHostEditor.get()) {
+        applyRelayServerFields();
     }
     else if (&ed == mRelayServerEditor.get()) {
         applyRelayServerFields();
@@ -1104,6 +1157,8 @@ void ConnectView::buttonClicked (Button* buttonThatWasClicked)
             wasconnected = true;
 
         }
+
+        applyRelayServerFields();
 
         String hostport = mServerHostEditor->getText();
 

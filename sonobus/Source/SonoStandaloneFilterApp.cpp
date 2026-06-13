@@ -406,6 +406,10 @@ public:
             String portpart = relayserv.fromFirstOccurrenceOf(":", false, false);
             relayServerPort = portpart.getIntValue();
             relayServerEnabled = relayServerHost.isNotEmpty() && relayServerPort > 0;
+            if (relayServerEnabled && cmdlineConnInfo.serverHost == DEFAULT_SERVER_HOST) {
+                cmdlineConnInfo.serverHost = relayServerHost;
+                cmdlineConnInfo.serverPort = DEFAULT_SERVER_PORT;
+            }
         }
 
         auto groupname = arglist.removeValueForOption(groupSpec);
