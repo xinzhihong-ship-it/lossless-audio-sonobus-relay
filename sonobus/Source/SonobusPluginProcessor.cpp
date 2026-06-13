@@ -240,6 +240,7 @@ private:
 
 static constexpr const char * SONOBUS_RELAY_MAGIC = "SBR1";
 static constexpr int SONOBUS_RELAY_HEADER_BYTES = 10;
+static constexpr int SONOBUS_RELAY_MAX_PACKET_SIZE = AOO_MAXPACKETSIZE + 1024;
 
 static void writeRelayU16(char *data, int offset, uint16 value)
 {
@@ -2439,11 +2440,11 @@ void SonobusAudioProcessor::updateSafetyMuting(RemotePeer * peer)
 void SonobusAudioProcessor::doReceiveData()
 {
     // receive from udp port, and parse packet
-    char buf[AOO_MAXPACKETSIZE];
+    char buf[SONOBUS_RELAY_MAX_PACKET_SIZE];
     String senderIP;
     int senderPort;
     
-    int nbytes = mUdpSocket->read(buf, AOO_MAXPACKETSIZE, false, senderIP, senderPort);
+    int nbytes = mUdpSocket->read(buf, SONOBUS_RELAY_MAX_PACKET_SIZE, false, senderIP, senderPort);
 
     if (nbytes == 0) return;
     else if (nbytes < 0) {
@@ -4517,6 +4518,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                             clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoined, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user));
                         }
                     }
+                    break;
                 }
                 
                 clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerPendingJoin, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user));

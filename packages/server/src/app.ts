@@ -386,10 +386,7 @@ function mergeAdminConnections(connections: AdminConnection[]): AdminConnection[
 }
 
 function sameSonoBusPeer(connection: ConnectionServerConnection, relay: Extract<UdpRelayConnection, { type: "sonobus-udp" }>): boolean {
-  if ((connection.group ?? "") !== relay.group || connection.user !== relay.user) {
-    return false;
-  }
-  return !connection.address || connection.address === relay.address;
+  return (connection.group ?? "") === relay.group && connection.user === relay.user;
 }
 
 function toConnectionBan(body: { group?: string; user?: string; address?: string; ttlSeconds?: number }) {
