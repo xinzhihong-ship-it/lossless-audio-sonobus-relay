@@ -460,6 +460,7 @@ function(sono_add_custom_plugin_target target_name product_name formats is_instr
         JUCE_LOAD_CURL_SYMBOLS_LAZILY=1
         FF_AUDIO_ALLOW_ALLOCATIONS_IN_MEASURE_BLOCK=0
         SONOBUS_BUILD_VERSION="${VERSION}"
+        SONOBUS_RELAY_BUILD="relay-20260614"
         ${PLAT_COMPILE_DEFS} )
 
     juce_add_binary_data("${target_name}_SBData" SOURCES

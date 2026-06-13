@@ -3808,8 +3808,8 @@ int32_t SonobusAudioProcessor::handleSourceEvents(const aoo_event ** events, int
                             DBG("Invite to echo source adding sink " << e->id);
                         }
                         else if (auto * latpeer = findRemotePeerByLatencyId(es, sourceId)) {
-                            echopeer->latencysource->add_sink(es, e->id, endpoint_send);                                                        
-                            echopeer->latencysource->start();
+                            latpeer->latencysource->add_sink(es, e->id, endpoint_send);
+                            latpeer->latencysource->start();
                             DBG("Invite to our latency source adding sink " << e->id);
                         }
                         else {
@@ -3865,8 +3865,8 @@ int32_t SonobusAudioProcessor::handleSourceEvents(const aoo_event ** events, int
                     DBG("UnInvite to echo source adding sink " << e->id);
                 }
                 else if (auto * latpeer = findRemotePeerByLatencyId(es, sourceId)) {
-                    echopeer->latencysource->remove_sink(es, e->id);
-                    echopeer->latencysource->stop();
+                    latpeer->latencysource->remove_sink(es, e->id);
+                    latpeer->latencysource->stop();
                     DBG("UnInvite to latency source adding sink " << e->id);
                 }
 

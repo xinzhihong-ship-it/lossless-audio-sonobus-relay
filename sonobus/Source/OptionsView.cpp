@@ -3,6 +3,10 @@
 
 #include "OptionsView.h"
 
+#ifndef SONOBUS_RELAY_BUILD
+#define SONOBUS_RELAY_BUILD "relay-unknown"
+#endif
+
 #if JUCE_ANDROID
 #include "juce_core/native/juce_BasicNativeHeaders.h"
 #include "juce_core/juce_core.h"
@@ -339,7 +343,7 @@ OptionsView::OptionsView(SonobusAudioProcessor& proc, std::function<AudioDeviceM
 
     
 
-    mVersionLabel = std::make_unique<Label>("", TRANS("Version: ") + ProjectInfo::versionString);
+    mVersionLabel = std::make_unique<Label>("", TRANS("Version: ") + ProjectInfo::versionString + " " + String(SONOBUS_RELAY_BUILD));
     configLabel(mVersionLabel.get(), true);
     mVersionLabel->setJustificationType(Justification::centredRight);
 
