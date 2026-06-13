@@ -954,7 +954,16 @@ void ConnectView::syncRelayServerFromConnectionServer()
     int relayPort = 0;
     parseServerHostPort(mRelayServerEditor->getText(), relayHost, relayPort, 0);
 
-    if (relayHost != connectionHost || relayPort <= 0) {
+    if (relayHost != connectionHost) {
+        String relayHostPort;
+        relayHostPort << connectionHost;
+        if (relayPort > 0) {
+            relayHostPort << ":" << relayPort;
+        } else {
+            relayHostPort << ":9000";
+        }
+        mRelayServerEditor->setText(relayHostPort, false);
+    } else if (relayPort <= 0) {
         String relayHostPort;
         relayHostPort << connectionHost << ":9000";
         mRelayServerEditor->setText(relayHostPort, false);

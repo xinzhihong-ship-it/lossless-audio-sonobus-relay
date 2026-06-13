@@ -53,7 +53,7 @@ SonoBus --group test-room \
 <你的服务器IP或域名>:10998
 ```
 
-5. 勾选 `Use Relay` 后，`Relay Server` 会自动使用同一台服务器的 `9000` 端口：
+5. 勾选 `Use Relay` 后，`Relay Server` 会自动使用同一台服务器；端口默认 `9000`，如果服务端改过 `UDP_RELAY_PORT`，把这里改成自己的中继端口：
 
 ```text
 <你的服务器IP或域名>:9000
