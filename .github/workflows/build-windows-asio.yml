@@ -2,6 +2,13 @@ name: Build Windows SonoBus ASIO
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/build-windows-asio.yml"
+      - "sonobus/**"
 
 jobs:
   build-windows-asio:
@@ -11,13 +18,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Check ASIO SDK
+      - name: Download Steinberg ASIO SDK
         shell: pwsh
         run: |
-          if (-not (Test-Path "asiosdk/common")) {
-            Write-Error "ASIO SDK is missing. Put the Steinberg ASIO SDK at repository root as asiosdk/common before running this workflow."
+          $ErrorActionPreference = "Stop"
+          $sdkUrl = "https://www.steinberg.net/asiosdk"
+          $zipPath = Join-Path $env:RUNNER_TEMP "asiosdk.zip"
+          $extractPath = Join-Path $env:RUNNER_TEMP "asiosdk"
+
+          Invoke-WebRequest -Uri $sdkUrl -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+          $commonPath = Get-ChildItem -Path $extractPath -Directory -Recurse |
+            Where-Object { $_.Name -eq "common" -and (Test-Path (Join-Path $_.FullName "iasiodrv.h")) } |
+            Select-Object -First 1
+
+          if ($null -eq $commonPath) {
+            Write-Error "Downloaded ASIO SDK, but could not find common/iasiodrv.h."
           }
+
+          New-Item -ItemType Directory -Force -Path asiosdk | Out-Null
+          Copy-Item -Recurse -Force $commonPath.FullName asiosdk/common
+          Get-ChildItem asiosdk/common | Select-Object Name, Length
 
       - name: Configure
         shell: pwsh
