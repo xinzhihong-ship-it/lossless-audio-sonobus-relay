@@ -325,6 +325,7 @@ public:
     void updateRelayHeartbeat();
     void sendRelayHeartbeat();
     void sendRelayUnregister();
+    void refreshRelayPeerInvites();
 
     // peer stuff
     

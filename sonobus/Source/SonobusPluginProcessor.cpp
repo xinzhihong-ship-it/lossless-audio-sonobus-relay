@@ -1238,7 +1238,7 @@ void SonobusAudioProcessor::updateRelayHeartbeat()
     if (shouldRun) {
         sendRelayHeartbeat();
         if (!mRelayHeartbeatTimer.isTimerRunning()) {
-            mRelayHeartbeatTimer.startTimer(5000);
+            mRelayHeartbeatTimer.startTimer(1000);
         }
     }
     else {
@@ -1278,6 +1278,29 @@ void SonobusAudioProcessor::sendRelayUnregister()
 
     auto unregisterPacket = makeSonoBusRelayPacket(endpoint, "", 0, 2);
     endpoint.owner->write(*(endpoint.peer), static_cast<const char *>(unregisterPacket.getData()), (int)unregisterPacket.getSize());
+}
+
+void SonobusAudioProcessor::refreshRelayPeerInvites()
+{
+    const ScopedReadLock sl (mCoreLock);
+
+    for (auto * remote : mRemotePeers) {
+        if (!remote || !remote->endpoint || !remote->endpoint->relayed || remote->recvActive) {
+            continue;
+        }
+
+        int32_t sourceId = remote->remoteSourceId >= 0 ? remote->remoteSourceId : 0;
+        remote->oursink->invite_source(remote->endpoint, sourceId, endpoint_send);
+
+        if (!mMainSendMute.get()) {
+            remote->sendAllow = true;
+            remote->sendAllowCache = true;
+            remote->sendActive = true;
+            remote->oursource->start();
+            updateRemotePeerUserFormat(-1, remote);
+            sendRemotePeerInfoUpdate(-1, remote);
+        }
+    }
 }
 
 
@@ -9139,6 +9162,7 @@ void SonobusAudioProcessor::ServerReconnectTimer::timerCallback()
 void SonobusAudioProcessor::RelayHeartbeatTimer::timerCallback()
 {
     processor.sendRelayHeartbeat();
+    processor.refreshRelayPeerInvites();
 }
 
 bool SonobusAudioProcessor::reconnectToMostRecent()
