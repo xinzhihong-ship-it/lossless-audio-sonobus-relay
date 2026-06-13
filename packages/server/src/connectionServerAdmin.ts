@@ -24,13 +24,13 @@ export type ConnectionServerBanRecord = Required<Pick<ConnectionServerKickReques
   group?: string;
   user?: string;
   address?: string;
-  expiresAt: string;
+  expiresAt: string | null;
 };
 
 export type ConnectionServerAdmin = {
   connections(): Promise<ConnectionServerConnection[]>;
   kick(request: ConnectionServerKickRequest): Promise<{ kicked: number }>;
-  ban(request: ConnectionServerBanRequest): Promise<{ banned: number; expiresAt: string }>;
+  ban(request: ConnectionServerBanRequest): Promise<{ banned: number; expiresAt: string | null }>;
   listBans(): Promise<ConnectionServerBanRecord[]>;
   unban(request: { id?: string; type?: "sonobus-connection"; group?: string; user?: string; address?: string }): Promise<{ removed: number }>;
 };
@@ -47,7 +47,7 @@ export class HttpConnectionServerAdmin implements ConnectionServerAdmin {
     return await this.request("/connections/kick", request);
   }
 
-  async ban(request: ConnectionServerBanRequest): Promise<{ banned: number; expiresAt: string }> {
+  async ban(request: ConnectionServerBanRequest): Promise<{ banned: number; expiresAt: string | null }> {
     return await this.request("/bans", request);
   }
 

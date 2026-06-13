@@ -331,6 +331,38 @@ test("admin can list, kick, and ban native SonoBus UDP peers", async () => {
   }
 });
 
+test("admin can create permanent UDP relay bans", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const result = await post<{ banned: number; expiresAt: string | null }>(baseUrl, "/admin/bans", adminToken, {
+      type: "sonobus-udp",
+      group: "band",
+      user: "alice",
+      ttlSeconds: 0
+    });
+    assert.equal(result.expiresAt, null);
+
+    const bans = await get<{ bans: Array<{ id: string; expiresAt: string | null }> }>(baseUrl, "/admin/bans", adminToken);
+    assert.equal(bans.bans.length, 1);
+    assert.equal(bans.bans[0].expiresAt, null);
+  } finally {
+    await app.close();
+  }
+});
+
 test("admin controls include SonoBus connection server users", async () => {
   const connectionServer = new FakeConnectionServerAdmin();
   connectionServer.connectionsList = [
@@ -396,12 +428,53 @@ test("admin controls include SonoBus connection server users", async () => {
   }
 });
 
+test("admin can create permanent SonoBus connection server bans", async () => {
+  const connectionServer = new FakeConnectionServerAdmin();
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    connectionServer
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    connectionServer.nextBanResult = { banned: 1, expiresAt: null };
+
+    const result = await post<{ banned: number; expiresAt: string | null }>(baseUrl, "/admin/bans", adminToken, {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      address: "203.0.113.9",
+      ttlSeconds: 0
+    });
+
+    assert.equal(result.expiresAt, null);
+    assert.deepEqual(connectionServer.lastBan, {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      address: "203.0.113.9",
+      ttlSeconds: 0
+    });
+  } finally {
+    await app.close();
+  }
+});
+
 class FakeConnectionServerAdmin implements ConnectionServerAdmin {
   connectionsList: Awaited<ReturnType<ConnectionServerAdmin["connections"]>> = [];
   bansList = [{ id: "ban-1", type: "sonobus-connection" as const, group: "band", user: "alice", expiresAt: "2026-06-13T10:02:00.000Z" }];
   lastKick?: unknown;
-  lastBan?: { type?: string };
+  lastBan?: { type?: string; group?: string; user?: string; address?: string; ttlSeconds?: number };
   lastUnban?: unknown;
+  nextBanResult: Awaited<ReturnType<ConnectionServerAdmin["ban"]>> = { banned: 1, expiresAt: "2026-06-13T10:02:00.000Z" };
 
   async connections() {
     return this.connectionsList;
@@ -412,9 +485,9 @@ class FakeConnectionServerAdmin implements ConnectionServerAdmin {
     return { kicked: 1 };
   }
 
-  async ban(request: { type?: string }) {
+  async ban(request: { type?: string; group?: string; user?: string; address?: string; ttlSeconds?: number }) {
     this.lastBan = request;
-    return { banned: 1, expiresAt: "2026-06-13T10:02:00.000Z" };
+    return this.nextBanResult;
   }
 
   async listBans() {

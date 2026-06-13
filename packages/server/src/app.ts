@@ -444,8 +444,28 @@ const adminPageHtml = String.raw`<!doctype html>
     }
     h1 {
       font-size: 24px;
-      margin: 0 0 18px;
+      margin: 0;
       letter-spacing: 0;
+    }
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 10px;
+      border: 1px solid #315b3d;
+      border-radius: 999px;
+      background: #132018;
+      color: #a7e0b5;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
     }
     h2 {
       font-size: 17px;
@@ -482,6 +502,10 @@ const adminPageHtml = String.raw`<!doctype html>
     input {
       min-width: 180px;
     }
+    input.small {
+      width: 96px;
+      min-width: 96px;
+    }
     #baseUrl {
       width: 260px;
     }
@@ -492,6 +516,9 @@ const adminPageHtml = String.raw`<!doctype html>
       font-weight: 600;
       white-space: nowrap;
     }
+    button:hover {
+      filter: brightness(1.08);
+    }
     button.secondary {
       background: #28313a;
       border-color: #3a4550;
@@ -499,6 +526,10 @@ const adminPageHtml = String.raw`<!doctype html>
     button.danger {
       background: #8d2d2d;
       border-color: #b23a3a;
+    }
+    button.warning {
+      background: #8a5a18;
+      border-color: #b7791f;
     }
     button:disabled {
       opacity: .55;
@@ -542,12 +573,36 @@ const adminPageHtml = String.raw`<!doctype html>
       gap: 8px;
       flex-wrap: wrap;
     }
+    .toolbar {
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px;
+      background: #111820;
+      border: 1px solid #2b333c;
+      border-radius: 6px;
+    }
+    .toolbar .row {
+      gap: 10px;
+    }
+    .toolbar label {
+      display: grid;
+      gap: 4px;
+      color: #b8c2cc;
+      font-size: 12px;
+    }
+    .toolbar label span {
+      color: #95a0aa;
+    }
     .status {
       min-height: 22px;
       margin-top: 10px;
       color: #a7d7ff;
       font-size: 13px;
       white-space: pre-wrap;
+    }
+    .status.ok {
+      color: #a7e0b5;
     }
     .subtle {
       color: #95a0aa;
@@ -568,10 +623,29 @@ const adminPageHtml = String.raw`<!doctype html>
         width: 100%;
         min-width: 0;
       }
+      input.small {
+        width: 100%;
+        min-width: 0;
+      }
       #baseUrl {
         width: 100%;
       }
+      .page-head {
+        display: block;
+      }
+      .badge {
+        margin-top: 10px;
+      }
       .row label {
+        width: 100%;
+      }
+      .toolbar {
+        align-items: stretch;
+      }
+      .toolbar .row {
+        width: 100%;
+      }
+      .toolbar button {
         width: 100%;
       }
       .table-wrap {
@@ -611,7 +685,10 @@ const adminPageHtml = String.raw`<!doctype html>
 </head>
 <body>
   <main>
-    <h1>服务器管理</h1>
+    <div class="page-head">
+      <h1>服务器管理</h1>
+      <span class="badge">自建 SonoBus 中继</span>
+    </div>
 
     <section>
       <h2>管理员登录</h2>
@@ -633,15 +710,24 @@ const adminPageHtml = String.raw`<!doctype html>
 
     <section>
       <h2>在线连接</h2>
-      <div class="row">
-        <button id="refreshBtn">刷新</button>
-        <label>封禁时长
-          <select id="banSeconds">
-            <option value="600">10 分钟</option>
-            <option value="3600" selected>1 小时</option>
-            <option value="86400">1 天</option>
-          </select>
-        </label>
+      <div class="row toolbar">
+        <div class="row">
+          <button id="refreshBtn">刷新</button>
+          <label>封禁时长
+            <select id="banSeconds">
+              <option value="600">10 分钟</option>
+              <option value="3600" selected>1 小时</option>
+              <option value="86400">1 天</option>
+              <option value="custom">自定义</option>
+              <option value="0">永久</option>
+            </select>
+          </label>
+          <label id="customBanLabel">自定义分钟
+            <input id="customBanMinutes" class="small" type="number" min="1" max="43200" value="60">
+            <span>最长 43200 分钟</span>
+          </label>
+        </div>
+        <span id="connectionSummary" class="muted">未刷新</span>
       </div>
       <div id="connectionStatus" class="status"></div>
       <div class="table-wrap">
@@ -698,10 +784,13 @@ const adminPageHtml = String.raw`<!doctype html>
     const passwordInput = document.getElementById("password");
     const loginStatus = document.getElementById("loginStatus");
     const connectionStatus = document.getElementById("connectionStatus");
+    const connectionSummary = document.getElementById("connectionSummary");
     const banStatus = document.getElementById("banStatus");
     const body = document.getElementById("connectionsBody");
     const bansBody = document.getElementById("bansBody");
     const banSeconds = document.getElementById("banSeconds");
+    const customBanLabel = document.getElementById("customBanLabel");
+    const customBanMinutes = document.getElementById("customBanMinutes");
 
     baseUrlInput.value = location.origin;
 
@@ -709,6 +798,8 @@ const adminPageHtml = String.raw`<!doctype html>
     document.getElementById("logoutBtn").addEventListener("click", logout);
     document.getElementById("refreshBtn").addEventListener("click", refreshConnections);
     document.getElementById("refreshBansBtn").addEventListener("click", refreshBans);
+    banSeconds.addEventListener("change", updateBanDurationControls);
+    updateBanDurationControls();
 
     if (localStorage.getItem(tokenKey)) {
       setStatus(loginStatus, "已保存登录状态。");
@@ -728,7 +819,7 @@ const adminPageHtml = String.raw`<!doctype html>
         if (!response.ok) throw new Error(data.error || "登录失败");
         localStorage.setItem(tokenKey, data.token);
         passwordInput.value = "";
-        setStatus(loginStatus, "登录成功。");
+        setStatus(loginStatus, "登录成功。", false, true);
         await refreshConnections();
         await refreshBans();
       } catch (error) {
@@ -740,6 +831,7 @@ const adminPageHtml = String.raw`<!doctype html>
       localStorage.removeItem(tokenKey);
       body.innerHTML = '<tr><td colspan="7" class="muted">已退出。</td></tr>';
       bansBody.innerHTML = '<tr><td colspan="6" class="muted">已退出。</td></tr>';
+      connectionSummary.textContent = "未刷新";
       setStatus(loginStatus, "已退出。");
     }
 
@@ -753,7 +845,8 @@ const adminPageHtml = String.raw`<!doctype html>
       try {
         const data = await apiGet("/admin/connections");
         renderConnections(data.connections || []);
-        setStatus(connectionStatus, "已刷新：" + new Date().toLocaleString());
+        connectionSummary.textContent = "在线 " + (data.connections || []).length + " 个";
+        setStatus(connectionStatus, "已刷新：" + new Date().toLocaleString(), false, true);
       } catch (error) {
         setStatus(connectionStatus, error.message, true);
       }
@@ -769,10 +862,24 @@ const adminPageHtml = String.raw`<!doctype html>
 
     async function ban(connection) {
       if (!confirm("确定踢出并封禁 " + displayUser(connection) + " 吗？")) return;
-      const result = await apiPost("/admin/bans", { ...banPayload(connection), ttlSeconds: Number(banSeconds.value) });
+      const ttlSeconds = selectedBanSeconds();
+      const result = await apiPost("/admin/bans", { ...banPayload(connection), ttlSeconds });
       await refreshConnections();
       await refreshBans();
-      setStatus(connectionStatus, "已封禁，踢出 " + (result.banned || 0) + " 条连接，到期时间：" + new Date(result.expiresAt).toLocaleString());
+      setStatus(connectionStatus, "已封禁，踢出 " + (result.banned || 0) + " 条连接，到期时间：" + displayExpiresAt(result.expiresAt), false, true);
+    }
+
+    function updateBanDurationControls() {
+      customBanLabel.style.display = banSeconds.value === "custom" ? "grid" : "none";
+    }
+
+    function selectedBanSeconds() {
+      if (banSeconds.value === "custom") {
+        const minutes = Math.max(1, Math.min(Number(customBanMinutes.value || 1), 43200));
+        customBanMinutes.value = String(minutes);
+        return minutes * 60;
+      }
+      return Number(banSeconds.value);
     }
 
     async function refreshBans() {
@@ -785,7 +892,7 @@ const adminPageHtml = String.raw`<!doctype html>
       try {
         const data = await apiGet("/admin/bans");
         renderBans(data.bans || []);
-        setStatus(banStatus, "已刷新封禁：" + new Date().toLocaleString());
+        setStatus(banStatus, "已刷新封禁：" + new Date().toLocaleString() + "，共 " + (data.bans || []).length + " 条。", false, true);
       } catch (error) {
         setStatus(banStatus, error.message, true);
       }
@@ -794,6 +901,7 @@ const adminPageHtml = String.raw`<!doctype html>
     function renderConnections(connections) {
       if (!connections.length) {
         body.innerHTML = '<tr><td colspan="7" class="muted">当前没有在线连接。</td></tr>';
+        connectionSummary.textContent = "在线 0 个";
         return;
       }
       body.innerHTML = "";
@@ -822,7 +930,7 @@ const adminPageHtml = String.raw`<!doctype html>
 
         if (connection.type !== "websocket") {
           const banButton = document.createElement("button");
-          banButton.className = "danger";
+          banButton.className = "warning";
           banButton.textContent = "封禁";
           banButton.title = "踢出并按上方时长封禁";
           banButton.addEventListener("click", () => runAction(() => ban(connection)));
@@ -848,7 +956,7 @@ const adminPageHtml = String.raw`<!doctype html>
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
-          cell("到期时间", new Date(ban.expiresAt).toLocaleString(), ban.expiresAt) +
+          cell("到期时间", displayExpiresAt(ban.expiresAt), ban.expiresAt || "永久") +
           '<td data-label="操作"><div class="actions"></div></td>';
         const actions = tr.querySelector(".actions");
         const unbanButton = document.createElement("button");
@@ -865,7 +973,7 @@ const adminPageHtml = String.raw`<!doctype html>
       if (!confirm("确定解除 " + displayBan(ban) + " 的封禁吗？")) return;
       const result = await apiPost("/admin/bans/remove", { id: ban.id });
       await refreshBans();
-      setStatus(banStatus, "已解除 " + (result.removed || 0) + " 条封禁。");
+      setStatus(banStatus, "已解除 " + (result.removed || 0) + " 条封禁。", false, true);
     }
 
     async function runAction(action) {
@@ -935,6 +1043,10 @@ const adminPageHtml = String.raw`<!doctype html>
       return ban.user || ban.userId || ban.address || ban.group || "该记录";
     }
 
+    function displayExpiresAt(expiresAt) {
+      return expiresAt ? new Date(expiresAt).toLocaleString() : "永久";
+    }
+
     function cell(label, text, title = "") {
       return '<td data-label="' + escapeHtml(label) + '" title="' + escapeHtml(title || text || "-") + '">' + escapeHtml(text || "-") + '</td>';
     }
@@ -949,9 +1061,10 @@ const adminPageHtml = String.raw`<!doctype html>
       })[char]);
     }
 
-    function setStatus(element, text, isError = false) {
+    function setStatus(element, text, isError = false, isOk = false) {
       element.textContent = text;
       element.classList.toggle("error", isError);
+      element.classList.toggle("ok", isOk && !isError);
     }
   </script>
 </body>

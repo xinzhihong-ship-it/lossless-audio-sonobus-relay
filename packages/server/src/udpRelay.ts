@@ -60,7 +60,7 @@ export type KickResult = {
 export type BanRecord = BanRequest & {
   id: string;
   type: "udp-session" | "sonobus-udp";
-  expiresAt: string;
+  expiresAt: string | null;
 };
 
 type RawPeer = {
@@ -73,7 +73,7 @@ type RawPeer = {
 type Ban = Required<Pick<BanRequest, "type">> & Omit<BanRequest, "type" | "ttlSeconds"> & {
   id: string;
   sessionId?: string;
-  expiresAt: number;
+  expiresAt: number | null;
 };
 
 export class UdpRelay {
@@ -156,13 +156,13 @@ export class UdpRelay {
     return { kicked };
   }
 
-  ban(request: BanRequest): { banned: number; expiresAt: string } {
+  ban(request: BanRequest): { banned: number; expiresAt: string | null } {
     const type = request.type ?? "sonobus-udp";
-    const ttlSeconds = Math.max(1, Math.min(Number(request.ttlSeconds ?? 3600), 30 * 24 * 60 * 60));
-    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const ttlSeconds = Number(request.ttlSeconds ?? 3600);
+    const expiresAt = ttlSeconds <= 0 ? null : Date.now() + Math.max(1, Math.min(ttlSeconds, 30 * 24 * 60 * 60)) * 1000;
     this.bans.push({ ...request, id: randomUUID(), type, expiresAt });
     const result = this.kick({ ...request, type });
-    return { banned: result.kicked, expiresAt: new Date(expiresAt).toISOString() };
+    return { banned: result.kicked, expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString() };
   }
 
   listBans(): BanRecord[] {
@@ -176,7 +176,7 @@ export class UdpRelay {
       group: ban.group,
       user: ban.user,
       address: ban.address,
-      expiresAt: new Date(ban.expiresAt).toISOString()
+      expiresAt: ban.expiresAt === null ? null : new Date(ban.expiresAt).toISOString()
     }));
   }
 
@@ -300,7 +300,7 @@ export class UdpRelay {
 
   private pruneExpiredBans(): void {
     const now = Date.now();
-    this.bans = this.bans.filter((ban) => ban.expiresAt > now);
+    this.bans = this.bans.filter((ban) => ban.expiresAt === null || ban.expiresAt > now);
   }
 }
 

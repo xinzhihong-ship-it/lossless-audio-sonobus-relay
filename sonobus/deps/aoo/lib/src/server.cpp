@@ -408,7 +408,7 @@ int32_t server::ban(const char *group, const char *user, const char *address,
     record.user = user ? user : "";
     record.address = address ? address : "";
     auto ttl = std::max<int32_t>(1, std::min<int32_t>(ttl_seconds > 0 ? ttl_seconds : 3600, 30 * 24 * 60 * 60));
-    record.expires_at = unix_seconds() + ttl;
+    record.expires_at = ttl_seconds <= 0 ? 0 : unix_seconds() + ttl;
     bans_.push_back(record);
     auto kicked = kick_locked(group, user, address);
     if (kicked > 0) {
@@ -416,7 +416,13 @@ int32_t server::ban(const char *group, const char *user, const char *address,
     }
 
     std::ostringstream os;
-    os << "{\"banned\":" << kicked << ",\"expiresAt\":\"" << iso_time(record.expires_at) << "\"}";
+    os << "{\"banned\":" << kicked << ",\"expiresAt\":";
+    if (record.expires_at <= 0) {
+        os << "null";
+    } else {
+        os << "\"" << iso_time(record.expires_at) << "\"";
+    }
+    os << "}";
     return copy_json_result(os.str(), buffer, size);
 }
 
@@ -533,7 +539,16 @@ std::string server::bans_json_locked() const
         json_prop(os, "group", bans_[i].group, first);
         json_prop(os, "user", bans_[i].user, first);
         json_prop(os, "address", bans_[i].address, first);
-        json_prop(os, "expiresAt", iso_time(bans_[i].expires_at), first);
+        if (!first) {
+            os << ",";
+        }
+        first = false;
+        os << "\"expiresAt\":";
+        if (bans_[i].expires_at <= 0) {
+            os << "null";
+        } else {
+            os << "\"" << iso_time(bans_[i].expires_at) << "\"";
+        }
         os << "}";
     }
     os << "]}";
@@ -584,7 +599,7 @@ void server::prune_bans_locked()
 {
     auto now = unix_seconds();
     bans_.erase(std::remove_if(bans_.begin(), bans_.end(), [&](const ban_record& ban) {
-        return ban.expires_at <= now;
+        return ban.expires_at > 0 && ban.expires_at <= now;
     }), bans_.end());
 }
 
