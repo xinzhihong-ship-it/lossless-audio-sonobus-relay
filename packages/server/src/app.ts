@@ -2,10 +2,10 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { WebSocketServer } from "ws";
 import { signToken, verifyPassword, verifyToken, type TokenClaims } from "./auth.js";
-import { HttpConnectionServerAdmin, type ConnectionServerAdmin } from "./connectionServerAdmin.js";
-import { RoomHub } from "./roomHub.js";
+import { HttpConnectionServerAdmin, type ConnectionServerAdmin, type ConnectionServerConnection } from "./connectionServerAdmin.js";
+import { RoomHub, type WebSocketConnection } from "./roomHub.js";
 import { MemoryStore, PostgresStore, type BanRecord, type BanType, type Store } from "./store.js";
-import { UdpRelay } from "./udpRelay.js";
+import { UdpRelay, type UdpRelayConnection } from "./udpRelay.js";
 
 export type ServerConfig = {
   jwtSecret: string;
@@ -24,6 +24,8 @@ export type App = {
   store: Store;
   close(): Promise<void>;
 };
+
+type AdminConnection = WebSocketConnection | UdpRelayConnection | ConnectionServerConnection;
 
 export async function createApp(config: ServerConfig): Promise<App> {
   const store = config.store ?? (config.databaseUrl ? new PostgresStore(config.databaseUrl) : new MemoryStore());
@@ -147,11 +149,11 @@ async function handleHttp(
       return;
     }
     sendJson(res, 200, {
-      connections: [
+      connections: mergeAdminConnections([
         ...hub.connections(),
         ...(udpRelay?.connections() ?? []),
         ...((await connectionServer?.connections()) ?? [])
-      ]
+      ])
     });
     return;
   }
@@ -172,8 +174,10 @@ async function handleHttp(
       address?: string;
     }>(req);
     const udpKick =
-      body.type === "websocket" || body.type === "sonobus-connection"
+      body.type === "websocket"
         ? undefined
+        : body.type === "sonobus-connection"
+          ? { ...body, type: "sonobus-udp" as const }
         : {
             ...body,
             type: body.type
@@ -211,8 +215,9 @@ async function handleHttp(
         return;
       }
       const result = await connectionServer.ban(toConnectionBan(body));
+      const udpResult = udpRelay?.ban(toUdpBan({ ...body, type: "sonobus-udp" }));
       const ban = await store.createBan(toStoredBan(body, result.expiresAt));
-      sendJson(res, 200, { banned: result.banned, expiresAt: ban.expiresAt });
+      sendJson(res, 200, { banned: result.banned + (udpResult?.banned ?? 0), expiresAt: ban.expiresAt });
       return;
     }
     if (!udpRelay) {
@@ -261,6 +266,7 @@ async function handleHttp(
     for (const ban of removed) {
       if (ban.type === "sonobus-connection") {
         removedFromServices += (await connectionServer?.unban(toConnectionUnban(ban)))?.removed ?? 0;
+        removedFromServices += udpRelay?.unban(toUdpUnban({ ...ban, type: "sonobus-udp" }, false)).removed ?? 0;
       } else {
         removedFromServices += udpRelay?.unban(toUdpUnban(ban, false)).removed ?? 0;
       }
@@ -352,6 +358,39 @@ function toConnectionKick(body: { group?: string; user?: string; address?: strin
   return compact({ type: "sonobus-connection" as const, group: body.group, user: body.user, address: body.address });
 }
 
+function mergeAdminConnections(connections: AdminConnection[]): AdminConnection[] {
+  const merged: AdminConnection[] = [];
+  const sonobusConnections = connections.filter((connection): connection is ConnectionServerConnection => connection.type === "sonobus-connection");
+
+  for (const connection of connections) {
+    if (connection.type !== "sonobus-udp") {
+      merged.push(connection);
+      continue;
+    }
+
+    const existing = sonobusConnections.find((candidate) => sameSonoBusPeer(candidate, connection));
+    if (!existing) {
+      merged.push(connection);
+      continue;
+    }
+
+    if (!existing.lastSeenAt || new Date(connection.lastSeenAt).getTime() > new Date(existing.lastSeenAt).getTime()) {
+      existing.lastSeenAt = connection.lastSeenAt;
+    }
+    existing.address ??= connection.address;
+    existing.port ??= connection.port;
+  }
+
+  return merged;
+}
+
+function sameSonoBusPeer(connection: ConnectionServerConnection, relay: Extract<UdpRelayConnection, { type: "sonobus-udp" }>): boolean {
+  if ((connection.group ?? "") !== relay.group || connection.user !== relay.user) {
+    return false;
+  }
+  return !connection.address || connection.address === relay.address;
+}
+
 function toConnectionBan(body: { group?: string; user?: string; address?: string; ttlSeconds?: number }) {
   return compact({ ...toConnectionKick(body), ttlSeconds: body.ttlSeconds });
 }
@@ -395,6 +434,7 @@ async function restorePersistentBans(store: Store, udpRelay?: UdpRelay, connecti
   for (const ban of bans) {
     if (ban.type === "sonobus-connection") {
       await connectionServer?.ban(toConnectionBan(toRestoredBanRequest(ban)));
+      udpRelay?.restoreBan(toUdpBanRecord(ban));
     } else {
       udpRelay?.restoreBan(toUdpBanRecord(ban));
     }
@@ -989,7 +1029,7 @@ const adminPageHtml = String.raw`<!doctype html>
         const port = connection.port || "-";
         const lastSeen = connection.lastSeenAt || connection.joinedAt || connection.createdAt || "-";
         tr.innerHTML =
-          cell("类型", connection.type, connection.type) +
+          cell("类型", displayConnectionType(connection.type), connection.type) +
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
@@ -1028,7 +1068,7 @@ const adminPageHtml = String.raw`<!doctype html>
         const user = ban.user || ban.userId || "-";
         const address = ban.address || "-";
         tr.innerHTML =
-          cell("类型", ban.type, ban.type) +
+          cell("类型", displayConnectionType(ban.type), ban.type) +
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
@@ -1121,6 +1161,16 @@ const adminPageHtml = String.raw`<!doctype html>
 
     function displayExpiresAt(expiresAt) {
       return expiresAt ? new Date(expiresAt).toLocaleString() : "永久";
+    }
+
+    function displayConnectionType(type) {
+      const labels = {
+        "websocket": "桌面端 WebSocket",
+        "udp-session": "桌面端 UDP 中继",
+        "sonobus-udp": "SonoBus 音频中继",
+        "sonobus-connection": "SonoBus 房间连接"
+      };
+      return labels[type] || type || "-";
     }
 
     function cell(label, text, title = "") {

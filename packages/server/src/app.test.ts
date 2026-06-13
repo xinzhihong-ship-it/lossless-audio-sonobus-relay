@@ -436,6 +436,58 @@ test("admin controls include SonoBus connection server users", async () => {
   }
 });
 
+test("admin connection list merges SonoBus connection and relay rows for the same user", async () => {
+  const connectionServer = new FakeConnectionServerAdmin();
+  connectionServer.connectionsList = [
+    {
+      type: "sonobus-connection",
+      group: "band",
+      user: "alice",
+      address: "127.0.0.1",
+      port: 32000,
+      connectedAt: "2026-06-13T10:00:00.000Z"
+    }
+  ];
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0,
+    connectionServer
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const aliceSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "merge-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await bindUdp(aliceSocket);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const listed = await get<{ connections: Array<{ type: string; group?: string; user?: string; lastSeenAt?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    const aliceRows = listed.connections.filter((connection) => connection.group === "band" && connection.user === "alice");
+    assert.equal(aliceRows.length, 1);
+    assert.equal(aliceRows[0].type, "sonobus-connection");
+    assert.ok(aliceRows[0].lastSeenAt);
+  } finally {
+    aliceSocket.close();
+    await app.close();
+  }
+});
+
 test("admin can create permanent SonoBus connection server bans", async () => {
   const connectionServer = new FakeConnectionServerAdmin();
   const app = await createApp({
