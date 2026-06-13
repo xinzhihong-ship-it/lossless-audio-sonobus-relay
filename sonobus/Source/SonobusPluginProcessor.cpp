@@ -4514,6 +4514,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                             clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoinBlocked, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user), endpoint->ipaddr, endpoint->port);
                         } else {
                             connectRemotePeerEndpoint(endpoint, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
+                            clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoined, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user));
                         }
                     }
                 }
@@ -4591,10 +4592,13 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
 
                 DBG("Peer leave group " <<  e->group << " - user " << e->user);
 
-                EndpointState * endpoint = findOrAddRawEndpoint(e->address);
-                if (endpoint) {
-                    
-                    removeAllRemotePeersWithEndpoint(endpoint);
+                if (mRelayServerEnabled) {
+                    removeAllRemotePeersWithRelayIdentity(CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user));
+                } else {
+                    EndpointState * endpoint = findOrAddRawEndpoint(e->address);
+                    if (endpoint) {
+                        removeAllRemotePeersWithEndpoint(endpoint);
+                    }
                 }
                 
                 //aoo_node_remove_peer(x->x_node, gensym(e->group), gensym(e->user));
@@ -6488,6 +6492,34 @@ bool SonobusAudioProcessor::removeAllRemotePeersWithEndpoint(EndpointState * end
     }
 
     // remote peers will be deleted when removed list goes out of scope
+
+    return didremove;
+}
+
+bool SonobusAudioProcessor::removeAllRemotePeersWithRelayIdentity(const String & group, const String & username)
+{
+    const ScopedReadLock sl (mCoreLock);
+
+    bool didremove = false;
+    OwnedArray<RemotePeer> removed;
+
+    for (int i = mRemotePeers.size()-1; i >= 0;  --i) {
+        auto * s = mRemotePeers.getUnchecked(i);
+        if (s->endpoint && s->endpoint->relayed && s->endpoint->relayGroupName == group && s->endpoint->relayPeerName == username) {
+            if (s->connected) {
+                disconnectRemotePeer(i);
+            }
+
+            adjustRemoteSendMatrix(i, true);
+            commitCacheForPeer(s);
+            didremove = true;
+
+            {
+                const ScopedWriteLock slw (mCoreLock);
+                removed.add(mRemotePeers.removeAndReturn(i));
+            }
+        }
+    }
 
     return didremove;
 }

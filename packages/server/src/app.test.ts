@@ -230,6 +230,51 @@ test("udp relay forwards native SonoBus SBR1 packets to learned group peers", as
   }
 });
 
+test("admin connection list expires inactive native SonoBus UDP peers", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0,
+    udpRawPeerTtlMs: 30
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const aliceSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "expiry-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await bindUdp(aliceSocket);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const listed = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(listed.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), true);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const expired = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(expired.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), false);
+  } finally {
+    aliceSocket.close();
+    await app.close();
+  }
+});
+
 test("admin can list, kick, and ban native SonoBus UDP peers", async () => {
   const app = await createApp({
     jwtSecret: "test-secret",

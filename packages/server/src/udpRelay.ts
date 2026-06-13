@@ -78,13 +78,15 @@ type Ban = Required<Pick<BanRequest, "type">> & Omit<BanRequest, "id" | "type" |
   expiresAt: number | null;
 };
 
+const RAW_PEER_TTL_MS = 15_000;
+
 export class UdpRelay {
   private socket = dgram.createSocket("udp4");
   private sessions = new Map<string, RelaySession>();
   private rawPeers = new Map<string, RawPeer>();
   private bans: Ban[] = [];
 
-  constructor(private port: number) {}
+  constructor(private port: number, private rawPeerTtlMs = RAW_PEER_TTL_MS) {}
 
   async start(): Promise<void> {
     this.socket.on("message", (message, remote) => this.handleMessage(message, remote));
@@ -113,6 +115,7 @@ export class UdpRelay {
 
   connections(): UdpRelayConnection[] {
     this.pruneExpiredBans();
+    this.pruneExpiredRawPeers();
     return [
       ...[...this.sessions.values()].map((session): UdpRelayConnection => ({
         type: "udp-session",
@@ -318,6 +321,15 @@ export class UdpRelay {
   private pruneExpiredBans(): void {
     const now = Date.now();
     this.bans = this.bans.filter((ban) => ban.expiresAt === null || ban.expiresAt > now);
+  }
+
+  private pruneExpiredRawPeers(): void {
+    const now = Date.now();
+    for (const [key, peer] of this.rawPeers) {
+      if (now - new Date(peer.lastSeenAt).getTime() > this.rawPeerTtlMs) {
+        this.rawPeers.delete(key);
+      }
+    }
   }
 
   private upsertBan(ban: Ban): void {

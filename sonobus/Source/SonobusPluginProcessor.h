@@ -903,6 +903,7 @@ private:
     bool doRemoveRemotePeerIfNecessary(EndpointState * endpoint, int32_t ourId);
     
     bool removeAllRemotePeersWithEndpoint(EndpointState * endpoint);
+    bool removeAllRemotePeersWithRelayIdentity(const String & group, const String & username);
 
     void adjustRemoteSendMatrix(int index, bool removed);
 

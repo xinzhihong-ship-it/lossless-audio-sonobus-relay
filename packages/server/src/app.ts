@@ -14,6 +14,7 @@ export type ServerConfig = {
   databaseUrl?: string;
   maxBytesPerSecondPerClient: number;
   udpRelayPort?: number;
+  udpRawPeerTtlMs?: number;
   connectionServerAdminUrl?: string;
   connectionServer?: ConnectionServerAdmin;
   store?: Store;
@@ -33,7 +34,7 @@ export async function createApp(config: ServerConfig): Promise<App> {
   await ensureAdmin(store, config.adminUsername, config.adminPassword);
 
   const hub = new RoomHub({ maxBytesPerSecondPerClient: config.maxBytesPerSecondPerClient });
-  const udpRelay = config.udpRelayPort === undefined ? undefined : new UdpRelay(config.udpRelayPort);
+  const udpRelay = config.udpRelayPort === undefined ? undefined : new UdpRelay(config.udpRelayPort, config.udpRawPeerTtlMs);
   const connectionServer = config.connectionServer ?? (config.connectionServerAdminUrl ? new HttpConnectionServerAdmin(config.connectionServerAdminUrl) : undefined);
   await udpRelay?.start();
   await restorePersistentBans(store, udpRelay, connectionServer);
