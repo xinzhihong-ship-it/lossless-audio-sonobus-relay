@@ -324,6 +324,7 @@ public:
     int getRelayServerPort() const { return mRelayServerPort; }
     void updateRelayHeartbeat();
     void sendRelayHeartbeat();
+    void sendRelayUnregister();
 
     // peer stuff
     

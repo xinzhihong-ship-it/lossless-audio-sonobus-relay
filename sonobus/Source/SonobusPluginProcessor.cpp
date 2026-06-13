@@ -945,6 +945,7 @@ mState (*this, &mUndoManager, "SonoBusAoO",
 
 SonobusAudioProcessor::~SonobusAudioProcessor()
 {
+    sendRelayUnregister();
     mRelayHeartbeatTimer.stopTimer();
     mTransportSource.setSource(nullptr);
     mTransportSource.removeChangeListener(this);
@@ -1262,6 +1263,23 @@ void SonobusAudioProcessor::sendRelayHeartbeat()
     endpoint.owner->write(*(endpoint.peer), static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
 }
 
+void SonobusAudioProcessor::sendRelayUnregister()
+{
+    if (!mRelayServerEnabled || mRelayServerHost.isEmpty() || mRelayServerPort <= 0 || mCurrentJoinedGroup.isEmpty() || mCurrentUsername.isEmpty() || !mUdpSocket) {
+        return;
+    }
+
+    EndpointState endpoint(mRelayServerHost, mRelayServerPort);
+    endpoint.owner = mUdpSocket.get();
+    endpoint.peer = std::make_unique<DatagramSocket::RemoteAddrInfo>(mRelayServerHost, mRelayServerPort);
+    endpoint.relayed = true;
+    endpoint.relaySourceName = mCurrentUsername;
+    endpoint.relayGroupName = mCurrentJoinedGroup;
+
+    auto unregisterPacket = makeSonoBusRelayPacket(endpoint, "", 0, 2);
+    endpoint.owner->write(*(endpoint.peer), static_cast<const char *>(unregisterPacket.getData()), (int)unregisterPacket.getSize());
+}
+
 
 bool SonobusAudioProcessor::connectToServer(const String & host, int port, const String & username, const String & passwd)
 {
@@ -1299,6 +1317,7 @@ bool SonobusAudioProcessor::disconnectFromServer()
 {
     if (!mAooClient) return false;
  
+    sendRelayUnregister();
     mAooClient->disconnect();
     
     // disconnect from everything else!
@@ -1425,6 +1444,10 @@ bool SonobusAudioProcessor::joinServerGroup(const String & group, const String &
 bool SonobusAudioProcessor::leaveServerGroup(const String & group)
 {
     if (!mAooClient) return false;
+
+    if (mCurrentJoinedGroup == group) {
+        sendRelayUnregister();
+    }
 
     int32_t retval = mAooClient->group_leave(group.toRawUTF8());
     

@@ -230,6 +230,99 @@ test("udp relay forwards native SonoBus SBR1 packets to learned group peers", as
   }
 });
 
+test("udp relay broadcasts native SonoBus payloads even when a stale target is present", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const aliceSocket = dgram.createSocket("udp4");
+  const bobSocket = dgram.createSocket("udp4");
+  const carolSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "sonobus-broadcast-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await Promise.all([bindUdp(aliceSocket), bindUdp(bobSocket), bindUdp(carolSocket)]);
+    bobSocket.send(encodeSbr1({ group: "band", source: "bob" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    carolSocket.send(encodeSbr1({ group: "band", source: "carol" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const payload = Buffer.from([5, 4, 3, 2, 1]);
+    const packet = encodeSbr1({ group: "band", source: "alice", target: "old-bob-endpoint" }, payload);
+    const bobReceived = onceUdpMessage(bobSocket);
+    const carolReceived = onceUdpMessage(carolSocket);
+    aliceSocket.send(packet, relayInfo.udpPort, "127.0.0.1");
+
+    assert.deepEqual(await bobReceived, packet);
+    assert.deepEqual(await carolReceived, packet);
+  } finally {
+    aliceSocket.close();
+    bobSocket.close();
+    carolSocket.close();
+    await app.close();
+  }
+});
+
+test("udp relay removes native SonoBus peers immediately when unregister packets arrive", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const aliceSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "unregister-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await bindUdp(aliceSocket);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const listed = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(listed.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), true);
+
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 2), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const afterUnregister = await get<{ connections: Array<{ type: string; group?: string; user?: string }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    assert.equal(
+      afterUnregister.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"),
+      false
+    );
+  } finally {
+    aliceSocket.close();
+    await app.close();
+  }
+});
+
 test("admin connection list expires inactive native SonoBus UDP peers", async () => {
   const app = await createApp({
     jwtSecret: "test-secret",
@@ -910,7 +1003,17 @@ async function bindUdp(socket: dgram.Socket): Promise<void> {
 }
 
 async function onceUdpMessage(socket: dgram.Socket): Promise<Buffer> {
-  return await new Promise((resolve) => socket.once("message", (message) => resolve(message)));
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error("timed out waiting for UDP message"));
+    }, 500);
+    const onMessage = (message: Buffer) => {
+      clearTimeout(timeout);
+      resolve(message);
+    };
+    socket.once("message", onMessage);
+  });
 }
 
 function encodeSbr1(header: Record<string, unknown>, payload: Buffer, type = 1): Buffer {

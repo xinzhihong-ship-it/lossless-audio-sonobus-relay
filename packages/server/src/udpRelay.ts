@@ -274,15 +274,19 @@ export class UdpRelay {
       return true;
     }
 
-    this.rawPeers.set(sourceKey, { group: packet.header.group, user: packet.header.source, endpoint: remote, lastSeenAt: new Date().toISOString() });
-
-    if (packet.type === 0) {
+    if (packet.type === 2) {
+      this.rawPeers.delete(sourceKey);
       return true;
     }
 
-    const targets = packet.header.target
-      ? [this.rawPeers.get(rawPeerKey(packet.header.group, packet.header.target))]
-      : [...this.rawPeers.values()].filter((peer) => peer.group === packet.header.group && peer.user !== packet.header.source);
+    if (packet.type === 0) {
+      this.rawPeers.set(sourceKey, { group: packet.header.group, user: packet.header.source, endpoint: remote, lastSeenAt: new Date().toISOString() });
+      return true;
+    }
+
+    this.rawPeers.set(sourceKey, { group: packet.header.group, user: packet.header.source, endpoint: remote, lastSeenAt: new Date().toISOString() });
+
+    const targets = [...this.rawPeers.values()].filter((peer) => peer.group === packet.header.group && peer.user !== packet.header.source);
 
     for (const target of targets) {
       if (target?.endpoint) {
@@ -368,7 +372,7 @@ function decodeSonoBusRelayPacket(message: Buffer): SonoBusRelayPacket | undefin
   const headerLength = message.readUInt16BE(6);
   const payloadLength = message.readUInt16BE(8);
   const expected = 10 + headerLength + payloadLength;
-  if (version !== 1 || ![0, 1].includes(type) || expected !== message.length) {
+  if (version !== 1 || ![0, 1, 2].includes(type) || expected !== message.length) {
     return undefined;
   }
 
