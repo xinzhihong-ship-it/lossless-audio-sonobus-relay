@@ -4530,7 +4530,11 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                     }
                     else {
                         if (mAutoconnectGroupPeers) {
-                            connectRemotePeerRaw(e->address, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
+                            if (mRelayServerEnabled) {
+                                connectRemotePeerEndpoint(endpoint, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
+                            } else {
+                                connectRemotePeerRaw(e->address, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group), !mMainRecvMute.get());
+                            }
                         }
                         
                         //aoo_node_add_peer(x->x_node, gensym(e->group), gensym(e->user),
@@ -4608,7 +4612,17 @@ int SonobusAudioProcessor::connectRemotePeerRaw(void * sockaddr, const String & 
         DBG("Error getting endpoint from raw address");
         return 0;
     }
-    
+
+    return connectRemotePeerEndpoint(endpoint, username, groupname, reciprocate);
+}
+
+int SonobusAudioProcessor::connectRemotePeerEndpoint(EndpointState * endpoint, const String & username, const String & groupname, bool reciprocate)
+{
+    if (!endpoint) {
+        DBG("Error connecting remote peer without endpoint");
+        return 0;
+    }
+
     RemotePeer * remote = doAddRemotePeerIfNecessary(endpoint, AOO_ID_NONE, username, groupname); // get new one
 
     remote->recvAllow = !mMainRecvMute.get();
