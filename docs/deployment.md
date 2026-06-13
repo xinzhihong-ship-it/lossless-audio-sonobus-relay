@@ -145,21 +145,21 @@ nano .env
 如果你有域名，例如 `audio.example.com`，并且域名 A 记录已经指向服务器公网 IP：
 
 ```dotenv
-PUBLIC_DOMAIN=your-server.example.com
-JWT_SECRET=replace-with-a-long-random-secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-with-a-strong-password
-POSTGRES_DB=lossless_audio
-POSTGRES_USER=lossless_audio
-POSTGRES_PASSWORD=replace-with-a-strong-db-password
-MAX_BYTES_PER_SECOND_PER_CLIENT=52428800
-UDP_RELAY_PORT=9000
+PUBLIC_DOMAIN=your-server.example.com # 你的域名；不要写 https://
+JWT_SECRET=replace-with-a-long-random-secret # JWT 登录签名密钥；必须改成长随机字符串
+ADMIN_USERNAME=admin # 管理员用户名；用于登录和创建用户
+ADMIN_PASSWORD=replace-with-a-strong-password # 管理员密码；必须改成强密码
+POSTGRES_DB=lossless_audio # PostgreSQL 数据库名；一般不用改
+POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
+POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
+MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
+UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
 ```
 
 把 `PUBLIC_DOMAIN` 改成你的域名：
 
 ```dotenv
-PUBLIC_DOMAIN=<你的域名>
+PUBLIC_DOMAIN=<你的域名> # 例如 audio.example.com；不要写 https://
 ```
 
 有域名时，Caddy 会自动申请 HTTPS 证书。
@@ -169,15 +169,15 @@ PUBLIC_DOMAIN=<你的域名>
 如果你暂时没有域名，只想用公网 IP 测试：
 
 ```dotenv
-PUBLIC_DOMAIN=:80
-JWT_SECRET=replace-with-a-long-random-secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-with-a-strong-password
-POSTGRES_DB=lossless_audio
-POSTGRES_USER=lossless_audio
-POSTGRES_PASSWORD=replace-with-a-strong-db-password
-MAX_BYTES_PER_SECOND_PER_CLIENT=52428800
-UDP_RELAY_PORT=9000
+PUBLIC_DOMAIN=:80 # 没有域名时使用 IP 测试；Caddy 只监听 HTTP 80
+JWT_SECRET=replace-with-a-long-random-secret # JWT 登录签名密钥；必须改成长随机字符串
+ADMIN_USERNAME=admin # 管理员用户名；用于登录和创建用户
+ADMIN_PASSWORD=replace-with-a-strong-password # 管理员密码；必须改成强密码
+POSTGRES_DB=lossless_audio # PostgreSQL 数据库名；一般不用改
+POSTGRES_USER=lossless_audio # PostgreSQL 数据库用户名；一般不用改
+POSTGRES_PASSWORD=replace-with-a-strong-db-password # PostgreSQL 数据库密码；必须改成强密码
+MAX_BYTES_PER_SECOND_PER_CLIENT=52428800 # 单客户端最大上行字节数/秒；默认 50 MB/s，防止异常打满带宽
+UDP_RELAY_PORT=9000 # SonoBus UDP 中继端口；云安全组必须放行 UDP 9000
 ```
 
 IP 模式下 HTTP API 地址是：
