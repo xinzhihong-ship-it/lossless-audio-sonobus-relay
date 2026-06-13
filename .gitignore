@@ -12,3 +12,6 @@ sonobus/buildXcode/
 sonobus/**/*.pdb
 windows-build/
 windows-build-asio/
+macos-build/
+linux-build/
+linux-server-bundle/
