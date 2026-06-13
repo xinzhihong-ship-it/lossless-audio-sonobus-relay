@@ -1,0 +1,171 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #101418;
+  color: #ecf2f8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+main {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+
+p {
+  color: #9fb0c0;
+  margin-top: 6px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  justify-content: flex-end;
+  color: #a9d8c5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.panel {
+  background: #182029;
+  border: 1px solid #263341;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.wide {
+  grid-column: span 2;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #9fb0c0;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+input,
+select,
+button {
+  min-height: 38px;
+  border-radius: 6px;
+  border: 1px solid #344455;
+  background: #0f141a;
+  color: #ecf2f8;
+  padding: 0 10px;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  background: #1c6b5a;
+  border-color: #2d8a74;
+  font-weight: 650;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.roomList,
+.streamList,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.roomList button {
+  background: #233142;
+  border-color: #34495f;
+}
+
+.roomList button.selected {
+  background: #7b5e24;
+  border-color: #b98d31;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: 2fr repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stream {
+  display: grid;
+  grid-template-columns: 140px 1fr 180px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid #263341;
+  border-radius: 8px;
+  padding: 10px;
+  background: #121922;
+}
+
+.stream span {
+  color: #9fb0c0;
+}
+
+@media (max-width: 860px) {
+  .topbar,
+  .grid,
+  .controlGrid,
+  .stream {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .wide {
+    grid-column: span 1;
+  }
+}

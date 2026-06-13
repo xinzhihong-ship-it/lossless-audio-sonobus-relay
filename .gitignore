@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+sonobus/build/
+sonobus/build32/
+sonobus/buildXcode/
+sonobus/**/build/
+sonobus/**/*.pdb

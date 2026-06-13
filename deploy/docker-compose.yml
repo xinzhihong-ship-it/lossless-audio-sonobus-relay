@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lossless_audio}
+      POSTGRES_USER: ${POSTGRES_USER:-lossless_audio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      DATABASE_URL: postgres://${POSTGRES_USER:-lossless_audio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lossless_audio}
+      MAX_BYTES_PER_SECOND_PER_CLIENT: ${MAX_BYTES_PER_SECOND_PER_CLIENT:-52428800}
+      UDP_RELAY_PORT: ${UDP_RELAY_PORT:-9000}
+    ports:
+      - "${UDP_RELAY_PORT:-9000}:${UDP_RELAY_PORT:-9000}/udp"
+    depends_on:
+      - postgres
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - server
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

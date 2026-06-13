@@ -1,0 +1,25 @@
+{
+  "name": "@lossless-audio/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@lossless-audio/protocol": "0.1.0",
+    "pg": "^8.13.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,51 @@
+name: Build Windows SonoBus
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "sonobus/**"
+
+jobs:
+  build-windows:
+    name: Windows x64 Release
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        shell: pwsh
+        working-directory: sonobus
+        run: >
+          cmake
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DSONOBUS_ENABLE_ASIO=OFF
+          -B build
+
+      - name: Build
+        shell: pwsh
+        working-directory: sonobus
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/windows-x64 | Out-Null
+          Copy-Item -Recurse -Force sonobus/build/SonoBus_artefacts/Release/Standalone/SonoBus.exe artifacts/windows-x64/
+          Copy-Item -Recurse -Force sonobus/build/SonoBus_artefacts/Release/VST3/SonoBus.vst3 artifacts/windows-x64/
+          Copy-Item -Recurse -Force sonobus/build/SonoBusInst_artefacts/Release/VST3/SonoBusInstrument.vst3 artifacts/windows-x64/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-windows-x64
+          path: artifacts/windows-x64
