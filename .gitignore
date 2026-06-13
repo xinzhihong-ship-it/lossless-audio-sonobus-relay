@@ -9,5 +9,4 @@ coverage/
 sonobus/build/
 sonobus/build32/
 sonobus/buildXcode/
-sonobus/**/build/
 sonobus/**/*.pdb
