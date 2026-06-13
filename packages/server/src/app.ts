@@ -878,6 +878,9 @@ const adminPageHtml = String.raw`<!doctype html>
     }
 
     function kickPayload(connection) {
+      if (connection.type === "sonobus-connection") {
+        return { type: "sonobus-connection", group: connection.group, user: connection.user, address: connection.address };
+      }
       if (connection.type === "sonobus-udp") {
         return { type: "sonobus-udp", group: connection.group, user: connection.user };
       }
@@ -888,6 +891,9 @@ const adminPageHtml = String.raw`<!doctype html>
     }
 
     function banPayload(connection) {
+      if (connection.type === "sonobus-connection") {
+        return { type: "sonobus-connection", group: connection.group, user: connection.user, address: connection.address };
+      }
       if (connection.type === "sonobus-udp") {
         return { type: "sonobus-udp", group: connection.group, user: connection.user };
       }

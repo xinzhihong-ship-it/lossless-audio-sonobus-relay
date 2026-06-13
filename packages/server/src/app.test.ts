@@ -105,6 +105,7 @@ test("admin web page is served for browser-based remote administration", async (
     assert.match(html, /服务器管理/);
     assert.match(html, /\/admin\/connections/);
     assert.match(html, /\/admin\/bans/);
+    assert.match(html, /sonobus-connection/);
   } finally {
     await app.close();
   }
