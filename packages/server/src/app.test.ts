@@ -109,6 +109,8 @@ test("admin web page is served for browser-based remote administration", async (
     assert.match(html, /中继包/);
     assert.match(html, /房间连接 \+ 音频中继/);
     assert.match(html, /connection.type !== "sonobus-udp" && !connection.hasRelay/);
+    assert.match(html, /relayCell\(relayStats\)/);
+    assert.match(html, /末包 /);
   } finally {
     await app.close();
   }

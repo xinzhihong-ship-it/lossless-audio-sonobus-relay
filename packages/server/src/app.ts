@@ -694,7 +694,7 @@ const adminPageHtml = String.raw`<!doctype html>
     }
     table {
       width: 100%;
-      min-width: 860px;
+      min-width: 1040px;
       border-collapse: collapse;
       font-size: 13px;
     }
@@ -713,6 +713,23 @@ const adminPageHtml = String.raw`<!doctype html>
     td:nth-child(7) {
       max-width: none;
       white-space: normal;
+    }
+    td:nth-child(6) {
+      max-width: 260px;
+      min-width: 220px;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+    .relay-stats {
+      display: grid;
+      gap: 3px;
+      line-height: 1.25;
+      white-space: normal;
+    }
+    .relay-stats span {
+      display: block;
+      white-space: nowrap;
     }
     th {
       color: #b8c2cc;
@@ -1071,7 +1088,7 @@ const adminPageHtml = String.raw`<!doctype html>
           cell("用户", user, user) +
           cell("IP", address, address) +
           cell("端口", String(port), String(port)) +
-          cell("中继包", relayStats, relayStats) +
+          relayCell(relayStats) +
           cell("最后活跃", lastSeen === "-" ? "-" : new Date(lastSeen).toLocaleString(), lastSeen) +
           '<td data-label="操作"><div class="actions"></div></td>';
         const actions = tr.querySelector(".actions");
@@ -1209,7 +1226,7 @@ const adminPageHtml = String.raw`<!doctype html>
       if (connection.type !== "sonobus-udp" && !connection.hasRelay) return "-";
       return "收 " + (connection.packetsReceived || 0)
         + " / 转 " + (connection.packetsForwarded || 0)
-        + " / 末包 " + (connection.lastPacketBytes || 0) + "B"
+        + "\n末包 " + (connection.lastPacketBytes || 0) + "B"
         + " / 末转 " + (connection.lastForwardCount || 0);
     }
 
@@ -1230,6 +1247,13 @@ const adminPageHtml = String.raw`<!doctype html>
 
     function cell(label, text, title = "") {
       return '<td data-label="' + escapeHtml(label) + '" title="' + escapeHtml(title || text || "-") + '">' + escapeHtml(text || "-") + '</td>';
+    }
+
+    function relayCell(text) {
+      const escaped = escapeHtml(text || "-");
+      return '<td class="relay-cell" data-label="中继包" title="' + escaped.replace(/\n/g, " ") + '"><div class="relay-stats">'
+        + escaped.split("\n").map((line) => "<span>" + line + "</span>").join("")
+        + "</div></td>";
     }
 
     function escapeHtml(value) {
