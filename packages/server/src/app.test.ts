@@ -886,6 +886,32 @@ test("admin merged SonoBus rows kick and ban the UDP relay peer", async () => {
     const aliceAfterBan = afterBan.connections.find((connection) => connection.group === "band" && connection.user === "alice");
     assert.equal(aliceAfterBan?.type, "sonobus-connection");
     assert.equal(aliceAfterBan?.hasRelay, undefined);
+
+    const bans = await get<{ bans: Array<{ id: string; type: string; group?: string; user?: string; address?: string }> }>(
+      baseUrl,
+      "/admin/bans",
+      adminToken
+    );
+    const aliceBan = bans.bans.find((ban) => ban.type === "sonobus-connection" && ban.group === "band" && ban.user === "alice");
+    assert.ok(aliceBan);
+
+    const unbanResult = await post<{ removed: number }>(baseUrl, "/admin/bans/remove", adminToken, { id: aliceBan.id });
+    assert.equal(unbanResult.removed, 1);
+    assert.equal((connectionServer.lastUnban as { group?: string }).group, "band");
+    assert.equal((connectionServer.lastUnban as { user?: string }).user, "alice");
+    assert.equal((connectionServer.lastUnban as { address?: string }).address, "203.0.113.10");
+
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const afterUnban = await get<{ connections: Array<{ type: string; group?: string; user?: string; hasRelay?: boolean }> }>(
+      baseUrl,
+      "/admin/connections",
+      adminToken
+    );
+    const aliceAfterUnban = afterUnban.connections.find((connection) => connection.group === "band" && connection.user === "alice");
+    assert.equal(aliceAfterUnban?.type, "sonobus-connection");
+    assert.equal(aliceAfterUnban?.hasRelay, true);
   } finally {
     aliceSocket.close();
     await app.close();

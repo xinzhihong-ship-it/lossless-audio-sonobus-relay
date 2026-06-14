@@ -287,7 +287,7 @@ async function handleHttp(
     for (const ban of removed) {
       if (ban.type === "sonobus-connection") {
         removedFromServices += (await connectionServer?.unban(toConnectionUnban(ban)))?.removed ?? 0;
-        removedFromServices += udpRelay?.unban(toUdpUnban({ ...ban, type: "sonobus-udp" }, false)).removed ?? 0;
+        removedFromServices += udpRelay?.unban(toUdpUnban({ ...ban, type: "sonobus-udp", address: undefined }, false)).removed ?? 0;
       } else {
         removedFromServices += udpRelay?.unban(toUdpUnban(ban, false)).removed ?? 0;
       }
