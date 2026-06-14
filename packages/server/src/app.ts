@@ -853,12 +853,13 @@ const adminPageHtml = String.raw`<!doctype html>
               <th>用户</th>
               <th>IP</th>
               <th>端口</th>
+              <th>中继包</th>
               <th>最后活跃</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="connectionsBody">
-            <tr><td colspan="7" class="muted">登录后点击刷新。</td></tr>
+            <tr><td colspan="8" class="muted">登录后点击刷新。</td></tr>
           </tbody>
         </table>
       </div>
@@ -943,7 +944,7 @@ const adminPageHtml = String.raw`<!doctype html>
 
     function logout() {
       localStorage.removeItem(tokenKey);
-      body.innerHTML = '<tr><td colspan="7" class="muted">已退出。</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="muted">已退出。</td></tr>';
       bansBody.innerHTML = '<tr><td colspan="6" class="muted">已退出。</td></tr>';
       connectionSummary.textContent = "未刷新";
       setStatus(loginStatus, "已退出。");
@@ -1014,7 +1015,7 @@ const adminPageHtml = String.raw`<!doctype html>
 
     function renderConnections(connections) {
       if (!connections.length) {
-        body.innerHTML = '<tr><td colspan="7" class="muted">当前没有在线连接。</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" class="muted">当前没有在线连接。</td></tr>';
         connectionSummary.textContent = "在线 0 个";
         return;
       }
@@ -1026,12 +1027,14 @@ const adminPageHtml = String.raw`<!doctype html>
         const address = connection.address || "-";
         const port = connection.port || "-";
         const lastSeen = connection.lastSeenAt || connection.joinedAt || connection.createdAt || "-";
+        const relayStats = displayRelayStats(connection);
         tr.innerHTML =
           cell("类型", displayConnectionType(connection.type), connection.type) +
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
           cell("端口", String(port), String(port)) +
+          cell("中继包", relayStats, relayStats) +
           cell("最后活跃", lastSeen === "-" ? "-" : new Date(lastSeen).toLocaleString(), lastSeen) +
           '<td data-label="操作"><div class="actions"></div></td>';
         const actions = tr.querySelector(".actions");
@@ -1169,6 +1172,14 @@ const adminPageHtml = String.raw`<!doctype html>
         "sonobus-connection": "SonoBus 房间连接"
       };
       return labels[type] || type || "-";
+    }
+
+    function displayRelayStats(connection) {
+      if (connection.type !== "sonobus-udp") return "-";
+      return "收 " + (connection.packetsReceived || 0)
+        + " / 转 " + (connection.packetsForwarded || 0)
+        + " / 末包 " + (connection.lastPacketBytes || 0) + "B"
+        + " / 末转 " + (connection.lastForwardCount || 0);
     }
 
     function cell(label, text, title = "") {

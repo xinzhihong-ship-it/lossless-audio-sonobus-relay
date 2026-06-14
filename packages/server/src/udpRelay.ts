@@ -31,6 +31,13 @@ export type UdpRelayConnection =
       address: string;
       port: number;
       lastSeenAt: string;
+      packetsReceived: number;
+      packetsForwarded: number;
+      bytesReceived: number;
+      bytesForwarded: number;
+      lastPacketType: number;
+      lastPacketBytes: number;
+      lastForwardCount: number;
     };
 
 export type KickRequest = {
@@ -70,6 +77,13 @@ type RawPeer = {
   user: string;
   endpoint: RemoteInfo;
   lastSeenAt: string;
+  packetsReceived: number;
+  packetsForwarded: number;
+  bytesReceived: number;
+  bytesForwarded: number;
+  lastPacketType: number;
+  lastPacketBytes: number;
+  lastForwardCount: number;
 };
 
 type Ban = Required<Pick<BanRequest, "type">> & Omit<BanRequest, "id" | "type" | "ttlSeconds" | "expiresAt"> & {
@@ -134,7 +148,14 @@ export class UdpRelay {
         user: peer.user,
         address: peer.endpoint.address,
         port: peer.endpoint.port,
-        lastSeenAt: peer.lastSeenAt
+        lastSeenAt: peer.lastSeenAt,
+        packetsReceived: peer.packetsReceived,
+        packetsForwarded: peer.packetsForwarded,
+        bytesReceived: peer.bytesReceived,
+        bytesForwarded: peer.bytesForwarded,
+        lastPacketType: peer.lastPacketType,
+        lastPacketBytes: peer.lastPacketBytes,
+        lastForwardCount: peer.lastForwardCount
       }))
     ];
   }
@@ -280,21 +301,41 @@ export class UdpRelay {
     }
 
     if (packet.type === 0) {
-      this.rawPeers.set(sourceKey, { group: packet.header.group, user: packet.header.source, endpoint: remote, lastSeenAt: new Date().toISOString() });
+      this.upsertRawPeer(sourceKey, packet, remote, message.length, 0, 0);
       return true;
     }
 
-    this.rawPeers.set(sourceKey, { group: packet.header.group, user: packet.header.source, endpoint: remote, lastSeenAt: new Date().toISOString() });
-
     const targets = [...this.rawPeers.values()].filter((peer) => peer.group === packet.header.group && peer.user !== packet.header.source);
+    let forwardCount = 0;
+    let forwardBytes = 0;
 
     for (const target of targets) {
       if (target?.endpoint) {
         this.socket.send(message, target.endpoint.port, target.endpoint.address);
+        forwardCount += 1;
+        forwardBytes += message.length;
       }
     }
+    this.upsertRawPeer(sourceKey, packet, remote, message.length, forwardCount, forwardBytes);
 
     return true;
+  }
+
+  private upsertRawPeer(sourceKey: string, packet: SonoBusRelayPacket, remote: RemoteInfo, receivedBytes: number, forwardCount: number, forwardBytes: number): void {
+    const existing = this.rawPeers.get(sourceKey);
+    this.rawPeers.set(sourceKey, {
+      group: packet.header.group,
+      user: packet.header.source,
+      endpoint: remote,
+      lastSeenAt: new Date().toISOString(),
+      packetsReceived: (existing?.packetsReceived ?? 0) + 1,
+      packetsForwarded: (existing?.packetsForwarded ?? 0) + forwardCount,
+      bytesReceived: (existing?.bytesReceived ?? 0) + receivedBytes,
+      bytesForwarded: (existing?.bytesForwarded ?? 0) + forwardBytes,
+      lastPacketType: packet.type,
+      lastPacketBytes: receivedBytes,
+      lastForwardCount: forwardCount
+    });
   }
 
   private isBanned(type: Ban["type"], values: { roomId?: string; userId?: string; group?: string; user?: string; address?: string }): boolean {

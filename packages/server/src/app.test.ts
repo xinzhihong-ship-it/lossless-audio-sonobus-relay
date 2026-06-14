@@ -106,6 +106,7 @@ test("admin web page is served for browser-based remote administration", async (
     assert.match(html, /\/admin\/connections/);
     assert.match(html, /\/admin\/bans/);
     assert.match(html, /sonobus-connection/);
+    assert.match(html, /中继包/);
   } finally {
     await app.close();
   }
@@ -364,6 +365,63 @@ test("admin connection list expires inactive native SonoBus UDP peers", async ()
     assert.equal(expired.connections.some((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice"), false);
   } finally {
     aliceSocket.close();
+    await app.close();
+  }
+});
+
+test("admin connection list includes native SonoBus relay packet counters", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const aliceSocket = dgram.createSocket("udp4");
+  const bobSocket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "stats-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await Promise.all([bindUdp(aliceSocket), bindUdp(bobSocket)]);
+    bobSocket.send(encodeSbr1({ group: "band", source: "bob" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.from([1, 2, 3, 4])), relayInfo.udpPort, "127.0.0.1");
+    await onceUdpMessage(bobSocket);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const listed = await get<{
+      connections: Array<{
+        type: string;
+        group?: string;
+        user?: string;
+        packetsReceived?: number;
+        packetsForwarded?: number;
+        bytesReceived?: number;
+        bytesForwarded?: number;
+        lastPacketBytes?: number;
+        lastForwardCount?: number;
+      }>;
+    }>(baseUrl, "/admin/connections", adminToken);
+    const alice = listed.connections.find((connection) => connection.type === "sonobus-udp" && connection.group === "band" && connection.user === "alice");
+    assert.ok(alice);
+    assert.equal(alice.packetsReceived, 1);
+    assert.equal(alice.packetsForwarded, 1);
+    assert.ok((alice.bytesReceived ?? 0) > 0);
+    assert.ok((alice.bytesForwarded ?? 0) > 0);
+    assert.equal(alice.lastForwardCount, 1);
+    assert.ok((alice.lastPacketBytes ?? 0) > 0);
+  } finally {
+    aliceSocket.close();
+    bobSocket.close();
     await app.close();
   }
 });
