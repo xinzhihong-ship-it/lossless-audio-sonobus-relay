@@ -46,7 +46,7 @@ SonoBus --group test-room \
 
 1. 填写 `Group Name`。
 2. 填写 `Your Displayed Name`。
-3. 如果使用官方服务器，`Connection Server` 保持默认，不勾选 `Use Relay`。
+3. 如果使用官方服务器，`Connection Server` 填回 `aoo.sonobus.net`，不勾选 `Use Relay`。
 4. 如果使用自建服务器，`Connection Server` 填：
 
 ```text

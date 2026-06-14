@@ -92,8 +92,10 @@ https://<你的域名>/admin
 
 如果使用官方 SonoBus 服务器：
 
-- `Connection Server`（连接服务器）：保持默认。
+- `Connection Server`（连接服务器）：`aoo.sonobus.net`
 - `Use Relay`（使用中继）：不勾选。
+
+如果之前改过自建服务器，想恢复官方服务器，就把 `Connection Server` 改回 `aoo.sonobus.net`，并关闭 `Use Relay`。
 
 如果使用自己的 Linux 公网服务器：
 

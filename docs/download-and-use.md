@@ -268,9 +268,11 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 
 这种情况下：
 
-- `Connection Server` 保持默认。
-- 不勾选 `Use Relay`。
-- 不填写 `Relay Server`。
+- `Connection Server`（连接服务器）：`aoo.sonobus.net`
+- `Use Relay`（使用中继）：不勾选。
+- `Relay Server`（中继服务器）：留空。
+
+如果之前改过自建服务器，想恢复官方服务器，就把 `Connection Server` 改回 `aoo.sonobus.net`，并关闭 `Use Relay`。
 
 注意：如果继续使用官方服务器，自己的 Linux Web 管理后台无法踢出/封禁这些用户。
 
