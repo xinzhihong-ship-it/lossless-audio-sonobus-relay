@@ -39,7 +39,7 @@ SonoBus 原本已经支持：
 
 [Actions 下载页](https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions)
 
-当前只保留最新版构建包，旧构建包已经清理。
+建议只下载最新的绿色 `success` 构建包。旧构建包可能缺少最新的中继、封禁、macOS 权限修复。
 
 下载包名称：
 
@@ -60,6 +60,21 @@ SonoBus 原本已经支持：
 新手按这个文档一步一步做：
 
 - [docs/deployment.md](docs/deployment.md)
+
+最短流程：
+
+```bash
+# 1. 上传服务器包到 /home/ubuntu/
+# 2. SSH 登录服务器后执行：
+sudo -i
+mkdir -p /opt/lossless-audio
+tar -xzf /home/ubuntu/lossless-audio-server-linux-docker.tar.gz -C /opt/lossless-audio --strip-components=1
+cd /opt/lossless-audio/deploy
+cp .env.example .env
+nano .env
+docker compose up -d --build
+curl -i http://127.0.0.1/health
+```
 
 部署完成后，浏览器打开：
 
@@ -89,6 +104,8 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 ```
 
 如果你在服务器 `.env` 里改过 `UDP_RELAY_PORT`，就把 `9000` 换成自己的中继端口。
+
+注意：`Connection Server` 和 `Relay Server` 都要填你的自建服务器。只填一个，或者继续用官方 `aoo.sonobus.net`，Web 后台就不能完整查看、踢出、封禁用户。
 
 ## Web 管理后台能做什么
 
@@ -137,6 +154,7 @@ http://<你的服务器IP或域名>/admin
 - SonoBus `Group Password` 是房间密码，只在客户端里使用。
 - 要让 Web 后台真正踢出/封禁 SonoBus 房间成员，客户端必须使用你的 `Connection Server`：`<你的服务器IP或域名>:10998`。
 - 如果客户端继续使用默认 `aoo.sonobus.net`，Web 后台无法真正管理这些房间成员。
+- macOS 请把 `SonoBus.app` 放进 `Applications`（应用程序）后再打开。第一次允许麦克风即可；如果老版本反复弹权限，执行 `tccutil reset Microphone com.Sonosaurus.SonoBus` 后换新版。
 
 ## 本地开发
 

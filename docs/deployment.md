@@ -85,6 +85,8 @@ lossless-audio-server-linux-docker
 lossless-audio-server-linux-docker.tar.gz
 ```
 
+如果 GitHub 页面里同时有很多历史构建，请选最新的绿色 `success`。旧包可能缺少最新的封禁、解封、中继修复。
+
 如果你是开发者，也可以从源码目录自己打包：
 
 ```bash
@@ -186,6 +188,14 @@ ls
 ```text
 deploy  docs  packages  tools  package.json  package-lock.json  README.md
 ```
+
+如果 `tar` 提示找不到文件，先确认压缩包名字：
+
+```bash
+ls -lh /home/ubuntu
+```
+
+如果你看到的文件名不是 `lossless-audio-server-linux-docker.tar.gz`，就把命令里的文件名改成实际名字。
 
 ## 6. 创建 .env 配置
 
@@ -400,7 +410,61 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 
 ## 11. 更新服务器
 
-如果只是更新 Web 后台、数据库逻辑、Node 服务端：
+### 情况 A：从 GitHub 下载新版服务器包更新
+
+先把新版 `lossless-audio-server-linux-docker.tar.gz` 上传到服务器 `/home/ubuntu/`，然后执行：
+
+```bash
+sudo -i
+cd /opt/lossless-audio
+tar -xzf /home/ubuntu/lossless-audio-server-linux-docker.tar.gz -C /opt/lossless-audio --strip-components=1
+chown -R ubuntu:ubuntu /opt/lossless-audio
+
+cd /opt/lossless-audio/deploy
+docker compose up -d --build
+
+curl -i http://127.0.0.1/health
+curl -s http://127.0.0.1/admin | grep -E "数据库|Docker 重启|永久|自定义"
+```
+
+如果健康检查返回：
+
+```json
+{"ok":true}
+```
+
+并且 `grep` 有输出，说明更新成功。
+
+### 情况 B：从本地源码打包更新
+
+Mac 本机源码目录执行：
+
+```bash
+cd "<你的项目目录>"
+COPYFILE_DISABLE=1 tar -czf /tmp/lossless-audio.tar.gz \
+  deploy docs packages tools package.json package-lock.json tsconfig.base.json README.md \
+  sonobus/deps/aoo
+
+scp /tmp/lossless-audio.tar.gz ubuntu@<你的服务器IP>:/home/ubuntu/
+```
+
+服务器执行：
+
+```bash
+sudo -i
+cd /opt/lossless-audio
+tar -xzf /home/ubuntu/lossless-audio.tar.gz -C /opt/lossless-audio
+chown -R ubuntu:ubuntu /opt/lossless-audio
+
+cd /opt/lossless-audio/deploy
+docker compose up -d --build
+
+curl -i http://127.0.0.1/health
+```
+
+### 情况 C：只改了 Web 后台、数据库逻辑、Node 服务端
+
+如果源码已经在 `/opt/lossless-audio` 里，只想快速重建 Node 服务端：
 
 ```bash
 cd /opt/lossless-audio/deploy
@@ -416,7 +480,9 @@ docker compose up -d --no-deps server
 | `--no-deps` | 不重启依赖服务 |
 | `server` | 只更新 Node 服务端 |
 
-如果改了 SonoBus connection-server C++ 代码，才需要：
+### 情况 D：改了 SonoBus connection-server C++ 代码
+
+只有改了 `tools/connection-server` 或 `sonobus/deps/aoo` 时，才需要：
 
 ```bash
 docker compose build --no-cache connection-server
@@ -431,6 +497,22 @@ docker compose up -d --build
 ```
 
 因为它可能重新编译 `connection-server`，国内服务器会很慢。
+
+### 腾讯云/国内服务器 apt 下载慢
+
+如果构建 `connection-server` 很慢，可以确认 `deploy/Dockerfile.connection-server` 里已经使用国内镜像逻辑。正常新版已经包含：
+
+```text
+mirrors.tencent.com
+```
+
+检查：
+
+```bash
+grep -n "mirrors.tencent.com" /opt/lossless-audio/deploy/Dockerfile.connection-server
+```
+
+如果没有输出，说明服务器上的部署包太旧，重新上传最新版。
 
 ## 12. 常用命令
 
@@ -532,6 +614,7 @@ http://<你的服务器IP>/admin
 - 云安全组是否放行 UDP `9000`。
 - 客户端是否勾选 `Use Relay`。
 - `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
+- Web 在线列表里 `中继包` 的 `收/转` 是否增长。
 - 双方是否同一个 `Group Name`。
 
 ### Web 看不到在线用户
@@ -556,7 +639,7 @@ Connection Server: <你的服务器IP或域名>:10998
 
 ### 解封后又回来封禁
 
-新版已经修复：解除封禁会从数据库删除。
+新版已经修复：解除封禁会从数据库删除，也会清掉 UDP 音频中继里的对应封禁。
 
 检查是否是新版：
 
@@ -565,6 +648,14 @@ curl -s http://127.0.0.1/admin | grep "封禁保存在数据库"
 ```
 
 有输出才是新版。
+
+如果你刚从旧版更新，建议：
+
+```bash
+docker compose restart server connection-server
+```
+
+然后在 Web 后台刷新封禁列表，把误封记录解除一遍。
 
 ## 15. 带宽估算
 

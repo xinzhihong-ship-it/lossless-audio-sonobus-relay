@@ -30,7 +30,11 @@ https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions
 5. 找 `Artifacts`。
 6. 下载自己需要的包。
 
-当前只保留最新版构建包，旧构建包已经清理。也就是说，页面底部 `Artifacts`（构建产物）里只应该看到当前可下载的最新版服务器包和客户端包。
+请下载最新的绿色 `success` 构建。不要长期使用旧包，因为旧包可能缺少：
+
+- 服务器封禁/解除封禁修复。
+- SonoBus 中继重连修复。
+- macOS 麦克风权限身份修复。
 
 ## 2. 下载哪个包
 
@@ -144,6 +148,31 @@ SonoBus.lv2
    - 点击允许打开
 3. 进入 SonoBus 音频设置，选择输入和输出设备。
 
+### 麦克风权限反复弹怎么办
+
+新版 macOS 包已经固定 `Bundle Identifier`（应用身份）和麦克风权限说明。正常流程是：
+
+1. 把 `SonoBus.app` 放到 `Applications`（应用程序）。
+2. 第一次打开时允许麦克风。
+3. 以后再打开不应该重复弹麦克风权限。
+
+如果你之前用过旧包，macOS 可能缓存了错误权限记录。先关闭 SonoBus，然后打开 `终端` 执行：
+
+```bash
+tccutil reset Microphone com.Sonosaurus.SonoBus
+```
+
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `tccutil` | macOS 权限数据库工具 |
+| `reset` | 重置 |
+| `Microphone` | 麦克风权限 |
+| `com.Sonosaurus.SonoBus` | SonoBus 的应用身份 |
+
+执行后重新打开 `Applications` 里的新版 `SonoBus.app`，允许一次麦克风即可。
+
 ### 插件安装位置
 
 VST3：
@@ -223,6 +252,16 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 
 用户名不要重复。
 
+常见错误：
+
+| 错误填法 | 结果 |
+| --- | --- |
+| 只填 `Connection Server`，不勾选 `Use Relay` | 可能能进房，但无公网 IP 用户音频无法稳定互通 |
+| 只填 `Relay Server`，Connection Server 仍用官方 | Web 后台不能完整踢出/封禁房间成员 |
+| 两个人 `Group Name` 不同 | 看不到对方 |
+| 两个人 `Group Password` 不同 | 进不了同一个房间 |
+| 两个人显示名相同 | Web 和客户端里容易混淆 |
+
 ## 7. 使用官方服务器
 
 如果你不想用自己的中继服务器，可以继续使用官方 SonoBus。
@@ -301,6 +340,7 @@ Group Password
 - SonoBus 是否勾选 `Use Relay`。
 - `Relay Server` 是否填写 `<你的服务器IP或域名>:9000`。
 - 双方是否同一个 `Group Name`。
+- Web 后台的在线连接里是否有 `SonoBus 房间连接 + 音频中继`，并且 `收/转` 数字在增加。
 
 ### Web 里看不到在线用户
 
@@ -345,3 +385,16 @@ http://<你的服务器IP或域名>/admin
 ```
 
 解除后会从数据库删除，重启 Docker 后不会再恢复。
+
+### 解除封禁后还是没声音
+
+请确认服务器已经更新到新版。新版修复了“封禁解除后 UDP 音频中继封禁没有清掉”的问题。
+
+服务器上检查：
+
+```bash
+cd /opt/lossless-audio/deploy
+curl -s http://127.0.0.1/admin | grep "封禁保存在数据库"
+```
+
+如果没有输出，说明服务端太旧，需要按 [deployment.md](deployment.md) 的“更新服务器”步骤更新。

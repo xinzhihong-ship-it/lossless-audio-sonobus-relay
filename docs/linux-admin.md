@@ -184,6 +184,12 @@ curl -s http://127.0.0.1/admin/connections \
 | `address` | 对方公网出口 IP |
 | `port` | 对方端口 |
 | `lastSeenAt` | 最后活跃时间 |
+| `hasRelay` | 是否已经合并到音频中继 |
+| `packetsReceived` | 中继收到的包数 |
+| `packetsForwarded` | 中继转发的包数 |
+| `lastForwardCount` | 最近一次转发给几个人 |
+
+如果 Web 页面里显示 `SonoBus 房间连接 + 音频中继`，并且 `收/转` 数字持续增加，说明音频中继正在工作。
 
 ### 踢出用户
 
@@ -297,7 +303,7 @@ curl -s http://127.0.0.1/admin/bans/remove \
 {"removed":1}
 ```
 
-解除后会从数据库删除。
+解除后会从数据库删除。新版还会同时清理 UDP 音频中继里的对应封禁，所以 Web 上解除后，不需要换房间名。
 
 ## 7. 直接查看 connection-server
 
@@ -389,6 +395,54 @@ docker compose restart server
 
 ```bash
 curl -s http://127.0.0.1/admin | grep "封禁保存在数据库"
+```
+
+### 解除封禁后还是提示对方静音
+
+先确认服务端是新版：
+
+```bash
+cd /opt/lossless-audio/deploy
+curl -s http://127.0.0.1/admin | grep "封禁保存在数据库"
+```
+
+再查看在线连接和中继统计：
+
+```bash
+docker compose exec -T server node - <<'NODE'
+const login = await fetch("http://127.0.0.1:8080/auth/login", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    username: process.env.ADMIN_USERNAME || "admin",
+    password: process.env.ADMIN_PASSWORD
+  })
+});
+
+const auth = await login.json();
+const res = await fetch("http://127.0.0.1:8080/admin/connections", {
+  headers: { authorization: "Bearer " + auth.token }
+});
+
+console.log(JSON.stringify(await res.json(), null, 2));
+NODE
+```
+
+重点看：
+
+| 字段 | 正常情况 |
+| --- | --- |
+| `hasRelay` | `true` |
+| `packetsReceived` | 持续增加 |
+| `packetsForwarded` | 持续增加 |
+| `lastForwardCount` | 两人房间通常是 `1` |
+
+如果 `packetsReceived` 增加但 `packetsForwarded` 不增加，检查是否只有一个人在线、房间名是否一致、是否还有封禁记录。
+
+如果更新前留下了旧内存状态，可以重启：
+
+```bash
+docker compose restart server connection-server
 ```
 
 ### 误封后怎么恢复
