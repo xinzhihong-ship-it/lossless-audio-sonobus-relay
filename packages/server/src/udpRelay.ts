@@ -40,6 +40,20 @@ export type UdpRelayConnection =
       lastForwardCount: number;
     };
 
+export type UdpRelayDiagnostics = {
+  unknownUdpPackets: number;
+  lastUnknownUdpPacketAt?: string;
+  lastUnknownUdpPacketFrom?: string;
+  lastUnknownUdpPacketBytes?: number;
+  lastUnknownUdpPacketPrefix?: string;
+  invalidSonoBusPackets: number;
+  lastInvalidSonoBusPacketAt?: string;
+  lastInvalidSonoBusPacketFrom?: string;
+  lastInvalidSonoBusPacketBytes?: number;
+  lastInvalidSonoBusPacketReason?: string;
+  lastInvalidSonoBusPacketPrefix?: string;
+};
+
 export type KickRequest = {
   type?: "udp-session" | "sonobus-udp";
   sessionId?: string;
@@ -99,6 +113,10 @@ export class UdpRelay {
   private sessions = new Map<string, RelaySession>();
   private rawPeers = new Map<string, RawPeer>();
   private bans: Ban[] = [];
+  private diagnostics: UdpRelayDiagnostics = {
+    unknownUdpPackets: 0,
+    invalidSonoBusPackets: 0
+  };
 
   constructor(private port: number, private rawPeerTtlMs = RAW_PEER_TTL_MS) {}
 
@@ -158,6 +176,10 @@ export class UdpRelay {
         lastForwardCount: peer.lastForwardCount
       }))
     ];
+  }
+
+  getDiagnostics(): UdpRelayDiagnostics {
+    return { ...this.diagnostics };
   }
 
   kick(request: KickRequest): KickResult {
@@ -244,6 +266,7 @@ export class UdpRelay {
     try {
       decoded = decodeRelayPacket(message);
     } catch {
+      this.recordUnknownUdpPacket(message, remote);
       return;
     }
 
@@ -282,6 +305,10 @@ export class UdpRelay {
   private handleSonoBusRelayMessage(message: Buffer, remote: RemoteInfo): boolean {
     const packet = decodeSonoBusRelayPacket(message);
     if (!packet) {
+      if (message.length >= 4 && message.subarray(0, 4).toString("ascii") === "SBR1") {
+        this.recordInvalidSonoBusPacket(message, remote, explainInvalidSonoBusRelayPacket(message));
+        return true;
+      }
       return false;
     }
 
@@ -382,6 +409,29 @@ export class UdpRelay {
     this.bans = this.bans.filter((existing) => existing.id !== ban.id);
     this.bans.push(ban);
   }
+
+  private recordInvalidSonoBusPacket(message: Buffer, remote: RemoteInfo, reason: string): void {
+    this.diagnostics = {
+      ...this.diagnostics,
+      invalidSonoBusPackets: this.diagnostics.invalidSonoBusPackets + 1,
+      lastInvalidSonoBusPacketAt: new Date().toISOString(),
+      lastInvalidSonoBusPacketFrom: `${remote.address}:${remote.port}`,
+      lastInvalidSonoBusPacketBytes: message.length,
+      lastInvalidSonoBusPacketReason: reason,
+      lastInvalidSonoBusPacketPrefix: message.subarray(0, Math.min(message.length, 96)).toString("hex")
+    };
+  }
+
+  private recordUnknownUdpPacket(message: Buffer, remote: RemoteInfo): void {
+    this.diagnostics = {
+      ...this.diagnostics,
+      unknownUdpPackets: this.diagnostics.unknownUdpPackets + 1,
+      lastUnknownUdpPacketAt: new Date().toISOString(),
+      lastUnknownUdpPacketFrom: `${remote.address}:${remote.port}`,
+      lastUnknownUdpPacketBytes: message.length,
+      lastUnknownUdpPacketPrefix: message.subarray(0, Math.min(message.length, 96)).toString("hex")
+    };
+  }
 }
 
 function banExpiresAt(request: BanRequest): number | null {
@@ -405,28 +455,59 @@ type SonoBusRelayPacket = {
 };
 
 function decodeSonoBusRelayPacket(message: Buffer): SonoBusRelayPacket | undefined {
-  if (message.length < 10 || message.subarray(0, 4).toString("ascii") !== "SBR1") {
+  const explained = explainInvalidSonoBusRelayPacket(message);
+  if (explained !== "") {
     return undefined;
+  }
+
+  const headerLength = message.readUInt16BE(6);
+  const payloadLength = message.readUInt16BE(8);
+  const headerText = trimJsonPadding(message.subarray(10, 10 + headerLength).toString("utf8"));
+  const header = JSON.parse(headerText) as SonoBusRelayPacket["header"];
+  if (!header.group || !header.source) {
+    return undefined;
+  }
+
+  return {
+    type: message.readUInt8(5),
+    header,
+    payload: message.subarray(10 + headerLength, 10 + headerLength + payloadLength)
+  };
+}
+
+function explainInvalidSonoBusRelayPacket(message: Buffer): string {
+  if (message.length < 10 || message.subarray(0, 4).toString("ascii") !== "SBR1") {
+    return "not SBR1 or packet shorter than 10 bytes";
   }
   const version = message.readUInt8(4);
   const type = message.readUInt8(5);
   const headerLength = message.readUInt16BE(6);
   const payloadLength = message.readUInt16BE(8);
   const expected = 10 + headerLength + payloadLength;
-  if (version !== 1 || ![0, 1, 2].includes(type) || expected !== message.length) {
-    return undefined;
+  if (version !== 1) {
+    return `unsupported version ${version}`;
+  }
+  if (![0, 1, 2].includes(type)) {
+    return `unsupported packet type ${type}`;
+  }
+  if (expected !== message.length) {
+    return `length mismatch expected ${expected} got ${message.length} header ${headerLength} payload ${payloadLength}`;
   }
 
-  const header = JSON.parse(message.subarray(10, 10 + headerLength).toString("utf8")) as SonoBusRelayPacket["header"];
+  let header: SonoBusRelayPacket["header"];
+  try {
+    header = JSON.parse(trimJsonPadding(message.subarray(10, 10 + headerLength).toString("utf8"))) as SonoBusRelayPacket["header"];
+  } catch (error) {
+    return `invalid JSON header: ${error instanceof Error ? error.message : String(error)}`;
+  }
   if (!header.group || !header.source) {
-    return undefined;
+    return "missing group or source";
   }
+  return "";
+}
 
-  return {
-    type,
-    header,
-    payload: message.subarray(10 + headerLength)
-  };
+function trimJsonPadding(value: string): string {
+  return value.replace(/\0+$/g, "").trim();
 }
 
 function rawPeerKey(group: string, user: string): string {

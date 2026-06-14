@@ -154,7 +154,10 @@ async function handleHttp(
         ...hub.connections(),
         ...(udpRelay?.connections() ?? []),
         ...((await connectionServer?.connections()) ?? [])
-      ])
+      ]),
+      diagnostics: {
+        udpRelay: udpRelay?.getDiagnostics()
+      }
     });
     return;
   }
@@ -961,7 +964,8 @@ const adminPageHtml = String.raw`<!doctype html>
         const data = await apiGet("/admin/connections");
         renderConnections(data.connections || []);
         connectionSummary.textContent = "在线 " + (data.connections || []).length + " 个";
-        setStatus(connectionStatus, "已刷新：" + new Date().toLocaleString(), false, true);
+        const relayDiagnostic = displayRelayDiagnostic(data.diagnostics && data.diagnostics.udpRelay);
+        setStatus(connectionStatus, "已刷新：" + new Date().toLocaleString() + relayDiagnostic, false, true);
       } catch (error) {
         setStatus(connectionStatus, error.message, true);
       }
@@ -1180,6 +1184,21 @@ const adminPageHtml = String.raw`<!doctype html>
         + " / 转 " + (connection.packetsForwarded || 0)
         + " / 末包 " + (connection.lastPacketBytes || 0) + "B"
         + " / 末转 " + (connection.lastForwardCount || 0);
+    }
+
+    function displayRelayDiagnostic(diagnostic) {
+      if (!diagnostic) return "";
+      const parts = [];
+      if (diagnostic.invalidSonoBusPackets) {
+        parts.push("无效 SBR1 中继包 " + diagnostic.invalidSonoBusPackets
+          + " 个，最近来自 " + (diagnostic.lastInvalidSonoBusPacketFrom || "-")
+          + "，原因：" + (diagnostic.lastInvalidSonoBusPacketReason || "-"));
+      }
+      if (diagnostic.unknownUdpPackets) {
+        parts.push("未知 UDP 包 " + diagnostic.unknownUdpPackets
+          + " 个，最近来自 " + (diagnostic.lastUnknownUdpPacketFrom || "-"));
+      }
+      return parts.length ? "；" + parts.join("；") : "";
     }
 
     function cell(label, text, title = "") {

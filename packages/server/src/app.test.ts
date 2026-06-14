@@ -426,6 +426,59 @@ test("admin connection list includes native SonoBus relay packet counters", asyn
   }
 });
 
+test("admin connection diagnostics include rejected UDP relay packets", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    udpRelayPort: 0
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const socket = dgram.createSocket("udp4");
+
+  try {
+    const adminToken = await login(baseUrl, "admin", "admin-pass");
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "diagnostics-room" });
+    const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
+
+    await bindUdp(socket);
+
+    const invalidSbr1 = Buffer.alloc(10);
+    invalidSbr1.write("SBR1", 0, 4, "ascii");
+    invalidSbr1.writeUInt8(1, 4);
+    invalidSbr1.writeUInt8(1, 5);
+    invalidSbr1.writeUInt16BE(20, 6);
+    invalidSbr1.writeUInt16BE(0, 8);
+    socket.send(invalidSbr1, relayInfo.udpPort, "127.0.0.1");
+    socket.send(Buffer.from("not-a-relay-packet"), relayInfo.udpPort, "127.0.0.1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const listed = await get<{
+      diagnostics?: {
+        udpRelay?: {
+          invalidSonoBusPackets?: number;
+          lastInvalidSonoBusPacketReason?: string;
+          unknownUdpPackets?: number;
+          lastUnknownUdpPacketFrom?: string;
+        };
+      };
+    }>(baseUrl, "/admin/connections", adminToken);
+
+    assert.equal(listed.diagnostics?.udpRelay?.invalidSonoBusPackets, 1);
+    assert.match(listed.diagnostics?.udpRelay?.lastInvalidSonoBusPacketReason ?? "", /length mismatch/);
+    assert.equal(listed.diagnostics?.udpRelay?.unknownUdpPackets, 1);
+    assert.match(listed.diagnostics?.udpRelay?.lastUnknownUdpPacketFrom ?? "", /127\.0\.0\.1:/);
+  } finally {
+    socket.close();
+    await app.close();
+  }
+});
+
 test("admin can list, kick, and ban native SonoBus UDP peers", async () => {
   const app = await createApp({
     jwtSecret: "test-secret",
