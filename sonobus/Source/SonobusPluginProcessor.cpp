@@ -242,6 +242,11 @@ static constexpr const char * SONOBUS_RELAY_MAGIC = "SBR1";
 static constexpr int SONOBUS_RELAY_HEADER_BYTES = 10;
 static constexpr int SONOBUS_RELAY_MAX_PACKET_SIZE = AOO_MAXPACKETSIZE + 1024;
 
+static bool isSelfHostedConnectionServer(const String& host, int port)
+{
+    return host.isNotEmpty() && host != DEFAULT_SERVER_HOST && port > 0;
+}
+
 static void writeRelayU16(char *data, int offset, uint16 value)
 {
     data[offset] = (char)((value >> 8) & 0xff);
@@ -1317,6 +1322,20 @@ bool SonobusAudioProcessor::connectToServer(const String & host, int port, const
     mServerEndpoint->ipaddr = host;
     mServerEndpoint->port = port;
     mServerEndpoint->peer.reset();
+
+    if (isSelfHostedConnectionServer(host, port)) {
+        const bool relayHostMissing = mRelayServerHost.isEmpty() || mRelayServerHost == DEFAULT_SERVER_HOST;
+        const bool relayHostMatchesServer = mRelayServerHost == host;
+        const bool relayPortMissingOrConnectionPort = mRelayServerPort <= 0 || mRelayServerPort == port;
+
+        if (relayHostMissing || relayHostMatchesServer) {
+            mRelayServerHost = host;
+            if (relayPortMissingOrConnectionPort) {
+                mRelayServerPort = DEFAULT_RELAY_SERVER_PORT;
+            }
+            mRelayServerEnabled = true;
+        }
+    }
 
     mCurrentUsername = username;
 

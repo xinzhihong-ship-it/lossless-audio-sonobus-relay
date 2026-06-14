@@ -961,15 +961,15 @@ void ConnectView::syncRelayServerFromConnectionServer()
     if (relayHost != connectionHost) {
         String relayHostPort;
         relayHostPort << connectionHost;
-        if (relayPort > 0) {
+        if (relayPort > 0 && relayPort != connectionPort) {
             relayHostPort << ":" << relayPort;
         } else {
-            relayHostPort << ":9000";
+            relayHostPort << ":" << DEFAULT_RELAY_SERVER_PORT;
         }
         mRelayServerEditor->setText(relayHostPort, false);
-    } else if (relayPort <= 0) {
+    } else if (relayPort <= 0 || relayPort == connectionPort) {
         String relayHostPort;
-        relayHostPort << connectionHost << ":9000";
+        relayHostPort << connectionHost << ":" << DEFAULT_RELAY_SERVER_PORT;
         mRelayServerEditor->setText(relayHostPort, false);
     }
 }
