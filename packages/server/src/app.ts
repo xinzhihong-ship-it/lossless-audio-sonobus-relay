@@ -27,6 +27,21 @@ export type App = {
 };
 
 type AdminConnection = WebSocketConnection | UdpRelayConnection | ConnectionServerConnection;
+type MergedSonoBusConnection = ConnectionServerConnection & {
+  type: "sonobus-connection";
+  hasRelay?: boolean;
+  relayGroup?: string;
+  relayUser?: string;
+  relayAddress?: string;
+  relayPort?: number;
+  packetsReceived?: number;
+  packetsForwarded?: number;
+  bytesReceived?: number;
+  bytesForwarded?: number;
+  lastPacketType?: number;
+  lastPacketBytes?: number;
+  lastForwardCount?: number;
+};
 
 export async function createApp(config: ServerConfig): Promise<App> {
   const store = config.store ?? (config.databaseUrl ? new PostgresStore(config.databaseUrl) : new MemoryStore());
@@ -176,12 +191,13 @@ async function handleHttp(
       group?: string;
       user?: string;
       address?: string;
+      hasRelay?: boolean;
     }>(req);
     const udpKick =
       body.type === "websocket"
         ? undefined
         : body.type === "sonobus-connection"
-          ? { ...body, type: "sonobus-udp" as const }
+          ? toUdpFromConnectionRequest(body)
         : {
             ...body,
             type: body.type
@@ -211,6 +227,7 @@ async function handleHttp(
       group?: string;
       user?: string;
       address?: string;
+      hasRelay?: boolean;
       ttlSeconds?: number;
     }>(req);
     if (body.type === "sonobus-connection") {
@@ -219,7 +236,7 @@ async function handleHttp(
         return;
       }
       const result = await connectionServer.ban(toConnectionBan(body));
-      const udpResult = udpRelay?.ban(toUdpBan({ ...body, type: "sonobus-udp" }));
+      const udpResult = udpRelay?.ban(toUdpFromConnectionRequest(body));
       const ban = await store.createBan(toStoredBan(body, result.expiresAt));
       sendJson(res, 200, { banned: result.banned + (udpResult?.banned ?? 0), expiresAt: ban.expiresAt });
       return;
@@ -362,9 +379,13 @@ function toConnectionKick(body: { group?: string; user?: string; address?: strin
   return compact({ type: "sonobus-connection" as const, group: body.group, user: body.user, address: body.address });
 }
 
+function toUdpFromConnectionRequest(body: { group?: string; user?: string; hasRelay?: boolean }) {
+  return compact({ type: "sonobus-udp" as const, group: body.group, user: body.user });
+}
+
 function mergeAdminConnections(connections: AdminConnection[]): AdminConnection[] {
   const merged: AdminConnection[] = [];
-  const sonobusConnections = connections.filter((connection): connection is ConnectionServerConnection => connection.type === "sonobus-connection");
+  const sonobusConnections = connections.filter((connection): connection is MergedSonoBusConnection => connection.type === "sonobus-connection");
 
   for (const connection of connections) {
     if (connection.type !== "sonobus-udp") {
@@ -381,6 +402,18 @@ function mergeAdminConnections(connections: AdminConnection[]): AdminConnection[
     if (!existing.lastSeenAt || new Date(connection.lastSeenAt).getTime() > new Date(existing.lastSeenAt).getTime()) {
       existing.lastSeenAt = connection.lastSeenAt;
     }
+    existing.hasRelay = true;
+    existing.relayGroup = connection.group;
+    existing.relayUser = connection.user;
+    existing.relayAddress = connection.address;
+    existing.relayPort = connection.port;
+    existing.packetsReceived = connection.packetsReceived;
+    existing.packetsForwarded = connection.packetsForwarded;
+    existing.bytesReceived = connection.bytesReceived;
+    existing.bytesForwarded = connection.bytesForwarded;
+    existing.lastPacketType = connection.lastPacketType;
+    existing.lastPacketBytes = connection.lastPacketBytes;
+    existing.lastForwardCount = connection.lastForwardCount;
     existing.address ??= connection.address;
     existing.port ??= connection.port;
   }
@@ -973,7 +1006,7 @@ const adminPageHtml = String.raw`<!doctype html>
 
     async function kick(connection) {
       if (!confirm("确定踢出 " + displayUser(connection) + " 吗？")) return;
-      const result = await apiPost("/admin/connections/kick", kickPayload(connection));
+      const result = await apiPost("/admin/connections/kick", connectionPayload(connection));
       await refreshConnections();
       await refreshBans();
       setStatus(connectionStatus, "已踢出 " + (result.kicked || 0) + " 条当前记录。UDP 客户端如果还在连接，会在继续发包后重新出现；要阻止它回来请点封禁。");
@@ -982,7 +1015,7 @@ const adminPageHtml = String.raw`<!doctype html>
     async function ban(connection) {
       if (!confirm("确定踢出并封禁 " + displayUser(connection) + " 吗？")) return;
       const ttlSeconds = selectedBanSeconds();
-      const result = await apiPost("/admin/bans", { ...banPayload(connection), ttlSeconds });
+      const result = await apiPost("/admin/bans", { ...connectionPayload(connection), ttlSeconds });
       await refreshConnections();
       await refreshBans();
       setStatus(connectionStatus, "已封禁，踢出 " + (result.banned || 0) + " 条连接，到期时间：" + displayExpiresAt(result.expiresAt), false, true);
@@ -1106,9 +1139,9 @@ const adminPageHtml = String.raw`<!doctype html>
       }
     }
 
-    function kickPayload(connection) {
+    function connectionPayload(connection) {
       if (connection.type === "sonobus-connection") {
-        return { type: "sonobus-connection", group: connection.group, user: connection.user, address: connection.address };
+        return { type: "sonobus-connection", group: connection.group, user: connection.user, address: connection.address, hasRelay: connection.hasRelay };
       }
       if (connection.type === "sonobus-udp") {
         return { type: "sonobus-udp", group: connection.group, user: connection.user };
@@ -1117,16 +1150,6 @@ const adminPageHtml = String.raw`<!doctype html>
         return { type: "udp-session", sessionId: connection.sessionId };
       }
       return { type: "websocket", roomId: connection.roomId, userId: connection.userId };
-    }
-
-    function banPayload(connection) {
-      if (connection.type === "sonobus-connection") {
-        return { type: "sonobus-connection", group: connection.group, user: connection.user, address: connection.address };
-      }
-      if (connection.type === "sonobus-udp") {
-        return { type: "sonobus-udp", group: connection.group, user: connection.user };
-      }
-      return { type: "udp-session", roomId: connection.roomId, userId: connection.userId };
     }
 
     async function apiGet(path) {
