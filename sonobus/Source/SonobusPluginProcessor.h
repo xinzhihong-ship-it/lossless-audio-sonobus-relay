@@ -323,6 +323,8 @@ public:
     bool getRelayServerEnabled() const { return mRelayServerEnabled; }
     String getRelayServerHost() const { return mRelayServerHost; }
     int getRelayServerPort() const { return mRelayServerPort; }
+    int64 getRelayHeartbeatSendCount() const { return mRelayHeartbeatSendCount; }
+    int getLastRelayHeartbeatWriteResult() const { return mLastRelayHeartbeatWriteResult; }
     void updateRelayHeartbeat();
     void sendRelayHeartbeat();
     void sendRelayUnregister();
@@ -1109,6 +1111,8 @@ private:
     bool mRelayServerEnabled = false;
     String mRelayServerHost;
     int mRelayServerPort = 0;
+    int64 mRelayHeartbeatSendCount = 0;
+    int mLastRelayHeartbeatWriteResult = 0;
 
     double mPrevSampleRate = 0.0;
     Atomic<bool> mPendingUnmute {false}; // jlc

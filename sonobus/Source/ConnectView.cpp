@@ -913,9 +913,15 @@ void ConnectView::applyRelayServerFields()
     const bool valid = !enabled || (host.isNotEmpty() && port > 0);
     mRelayServerEditor->setColour(TextEditor::backgroundColourId, valid ? Colour(0xff050505) : Colour(0xff880000));
     mRelayServerEditor->repaint();
+    String relayStatus;
+    relayStatus << TRANS("Relay Server") << ": "
+                << (processor.getRelayServerEnabled() ? TRANS("On") : TRANS("Off")) << " "
+                << processor.getRelayServerHost() << ":" << processor.getRelayServerPort()
+                << " | " << TRANS("Heartbeat") << ": " << processor.getRelayHeartbeatSendCount()
+                << " | " << TRANS("Write") << ": " << processor.getLastRelayHeartbeatWriteResult() << "\n";
     mServerAudioInfoLabel->setText(enabled
-        ? TRANS("Relay mode uses your own server for both group connection and audio relay. Audio payloads are forwarded only and are not decoded, mixed, transcoded, or resampled.")
-        : TRANS("The connection server is only used to help users find each other, no audio passes through it. All audio is sent directly between users (peer to peer)."),
+        ? relayStatus + TRANS("Relay mode uses your own server for both group connection and audio relay. Audio payloads are forwarded only and are not decoded, mixed, transcoded, or resampled.")
+        : relayStatus + TRANS("The connection server is only used to help users find each other, no audio passes through it. All audio is sent directly between users (peer to peer)."),
         dontSendNotification);
 }
 

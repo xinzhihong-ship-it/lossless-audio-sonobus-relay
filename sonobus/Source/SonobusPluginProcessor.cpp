@@ -1254,6 +1254,7 @@ void SonobusAudioProcessor::updateRelayHeartbeat()
 void SonobusAudioProcessor::sendRelayHeartbeat()
 {
     if (!mRelayServerEnabled || mRelayServerHost.isEmpty() || mRelayServerPort <= 0 || mCurrentJoinedGroup.isEmpty() || mCurrentUsername.isEmpty() || !mUdpSocket) {
+        mLastRelayHeartbeatWriteResult = -9999;
         return;
     }
 
@@ -1265,7 +1266,11 @@ void SonobusAudioProcessor::sendRelayHeartbeat()
     endpoint.relayGroupName = mCurrentJoinedGroup;
 
     auto registerPacket = makeSonoBusRelayPacket(endpoint, "", 0, 0);
-    endpoint.owner->write(*(endpoint.peer), static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
+    const int result = endpoint.owner->write(mRelayServerHost, mRelayServerPort, static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
+    mLastRelayHeartbeatWriteResult = result;
+    if (result > 0) {
+        ++mRelayHeartbeatSendCount;
+    }
 }
 
 void SonobusAudioProcessor::sendRelayUnregister()
