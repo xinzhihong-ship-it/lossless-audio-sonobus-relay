@@ -238,7 +238,7 @@ publicGroupsListModel(this)
 
     mRelayServerEnabledButton = std::make_unique<ToggleButton>(TRANS("Use Relay"));
     mRelayServerEnabledButton->setTitle(TRANS("Use Relay Server"));
-    mRelayServerEnabledButton->setTooltip(TRANS("Use your own public server for both the connection server and audio relay. Leave this off when using the official connection server."));
+    mRelayServerEnabledButton->setTooltip(TRANS("Use your own public server for both the connection server and audio relay. This turns on automatically when the connection server is not the official server."));
     mRelayServerEnabledButton->addListener(this);
     mRelayServerEnabledButton->setClickingTogglesState(true);
 
@@ -249,7 +249,7 @@ publicGroupsListModel(this)
     mRelayServerEditor->setTitle(TRANS("Relay Server"));
     mRelayServerEditor->setFont(Font(14 * SonoLookAndFeel::getFontScale()));
     mRelayServerEditor->setTextToShowWhenEmpty(TRANS("host:9000"), Colour(0x44ffffff));
-    mRelayServerEditor->setTooltip(TRANS("Public UDP relay server host:port. When relay is enabled this follows the connection server host and uses port 9000."));
+    mRelayServerEditor->setTooltip(TRANS("Public UDP relay server host:port. When relay is enabled this follows the connection server host. The default relay port is 9000, but you can change it."));
     configEditor(mRelayServerEditor.get());
 
     mMainStatusLabel = std::make_unique<Label>("mainstat", "");
@@ -932,14 +932,18 @@ void ConnectView::parseServerHostPort(const String& hostport, String& host, int&
     }
 }
 
+bool ConnectView::isOfficialConnectionServer(const String& host) const
+{
+    return host.isEmpty() || host == DEFAULT_SERVER_HOST;
+}
+
 void ConnectView::syncRelayServerFromConnectionServer()
 {
     String connectionHost;
     int connectionPort = DEFAULT_SERVER_PORT;
     parseServerHostPort(mServerHostEditor->getText(), connectionHost, connectionPort, DEFAULT_SERVER_PORT);
 
-    const bool usingDefaultConnectionServer = connectionHost.isEmpty() || connectionHost == DEFAULT_SERVER_HOST;
-    if (usingDefaultConnectionServer) {
+    if (isOfficialConnectionServer(connectionHost)) {
         if (mRelayServerEnabledButton->getToggleState()) {
             mRelayServerEnabledButton->setToggleState(false, dontSendNotification);
         }
@@ -947,7 +951,7 @@ void ConnectView::syncRelayServerFromConnectionServer()
     }
 
     if (!mRelayServerEnabledButton->getToggleState()) {
-        return;
+        mRelayServerEnabledButton->setToggleState(true, dontSendNotification);
     }
 
     String relayHost;
@@ -1167,8 +1171,6 @@ void ConnectView::buttonClicked (Button* buttonThatWasClicked)
 
         }
 
-        applyRelayServerFields();
-
         String hostport = mServerHostEditor->getText();
 
         // parse it
@@ -1182,6 +1184,8 @@ void ConnectView::buttonClicked (Button* buttonThatWasClicked)
         if (toks.size() >= 2) {
             port = toks[1].trim().getIntValue();
         }
+
+        applyRelayServerFields();
 
         AooServerConnectionInfo info;
         info.userName = mServerUsernameEditor->getText().trim();

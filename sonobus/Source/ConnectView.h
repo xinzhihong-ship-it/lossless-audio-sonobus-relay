@@ -95,6 +95,7 @@ protected:
     void publicGroupLogin();
     void showAdvancedMenu();
     void parseServerHostPort(const String& hostport, String& host, int& port, int defaultPort) const;
+    bool isOfficialConnectionServer(const String& host) const;
     void syncRelayServerFromConnectionServer();
     void applyRelayServerFields();
     void updateRelayServerFieldsFromProcessor();
