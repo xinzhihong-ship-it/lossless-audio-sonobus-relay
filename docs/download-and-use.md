@@ -46,6 +46,82 @@ https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions
 | `sonobus-linux-x64` | Linux x64 版 | Linux 用户 |
 | `lossless-audio-server-linux-docker` | Linux 服务器部署包 | 服务器管理员 |
 
+## 3. 插件放哪个目录
+
+本项目常用插件格式是 `VST3`、`AU`、`LV2`。不同系统和 DAW 支持的格式不一样，按下面放。
+
+英文解释：
+
+| 英文 | 中文意思 |
+| --- | --- |
+| `DAW` | 宿主软件，比如 Cubase、Studio One、Logic、Reaper、Ableton Live |
+| `VST3` | 常见插件格式，Windows/macOS/Linux 都可用 |
+| `AU` | Apple Audio Unit，macOS/Logic 常用插件格式 |
+| `LV2` | Linux 常用插件格式，部分 macOS/Linux 宿主支持 |
+| `System-wide` | 全系统目录，所有用户都能用 |
+| `User-only` | 当前用户目录，只给当前登录用户用 |
+
+### Windows 插件目录
+
+Windows 通常只需要放 `VST3`。
+
+| 插件格式 | 推荐目录 | 中文说明 |
+| --- | --- | --- |
+| `VST3` | `C:\Program Files\Common Files\VST3\` | 全系统 VST3 插件目录 |
+
+把下面文件夹复制进去：
+
+```text
+SonoBus.vst3
+SonoBusInstrument.vst3
+```
+
+如果 DAW 没扫到，打开 DAW 的 `Plugin Manager`（插件管理器）或 `Rescan Plugins`（重新扫描插件）。
+
+### macOS 插件目录
+
+macOS 可以用 `VST3`、`AU`、`LV2`。Logic Pro 主要用 `AU`，大多数其他 DAW 可以用 `VST3`。
+
+| 插件格式 | 推荐目录 | 中文说明 |
+| --- | --- | --- |
+| `VST3` | `/Library/Audio/Plug-Ins/VST3/` | 全系统 VST3 插件目录 |
+| `VST3` | `~/Library/Audio/Plug-Ins/VST3/` | 当前用户 VST3 插件目录 |
+| `AU` | `/Library/Audio/Plug-Ins/Components/` | 全系统 AU 插件目录，Logic Pro 用这个 |
+| `AU` | `~/Library/Audio/Plug-Ins/Components/` | 当前用户 AU 插件目录 |
+| `LV2` | `/Library/Audio/Plug-Ins/LV2/` | 全系统 LV2 插件目录 |
+| `LV2` | `~/Library/Audio/Plug-Ins/LV2/` | 当前用户 LV2 插件目录 |
+
+复制对应文件夹：
+
+```text
+SonoBus.vst3
+SonoBusInstrument.vst3
+SonoBus.component
+SonoBus.lv2
+```
+
+注意：`~` 表示当前用户目录。例如当前用户是 `xinzhihong`，`~/Library/...` 就是 `/Users/xinzhihong/Library/...`。
+
+### Linux 插件目录
+
+Linux 推荐放到当前用户目录，不需要管理员权限。
+
+| 插件格式 | 当前用户目录 | 全系统目录 |
+| --- | --- | --- |
+| `VST3` | `~/.vst3/` | `/usr/local/lib/vst3/` 或 `/usr/lib/vst3/` |
+| `LV2` | `~/.lv2/` | `/usr/local/lib/lv2/` 或 `/usr/lib/lv2/` |
+
+推荐新手使用当前用户目录：
+
+```bash
+mkdir -p ~/.vst3 ~/.lv2
+cp -a SonoBus.vst3 ~/.vst3/
+cp -a SonoBusInstrument.vst3 ~/.vst3/
+cp -a SonoBus.lv2 ~/.lv2/
+```
+
+复制后重启 DAW，或者在 DAW 里执行重新扫描插件。
+
 如果你是 Windows 用户，优先下载：
 
 ```text
@@ -58,7 +134,7 @@ sonobus-windows-x64-asio
 sonobus-windows-x64
 ```
 
-## 3. Windows 使用
+## 4. Windows 使用
 
 下载 `sonobus-windows-x64-asio` 后解压。
 
@@ -90,7 +166,7 @@ SonoBusInstrument.vst3
 
 ### VST3 插件安装
 
-把这些文件夹复制到：
+把这些文件夹复制到 Windows VST3 插件目录：
 
 ```text
 C:\Program Files\Common Files\VST3\
@@ -114,7 +190,7 @@ SonoBusInstrument.vst3
 | `VST3` | VST3 插件 |
 | `Insert` | 插入插件 |
 
-## 4. macOS 使用
+## 5. macOS 使用
 
 下载 `sonobus-macos-universal` 后解压。
 
@@ -175,19 +251,31 @@ tccutil reset Microphone com.Sonosaurus.SonoBus
 
 ### 插件安装位置
 
-VST3：
+VST3（大多数 DAW 可用）：
 
 ```text
 /Library/Audio/Plug-Ins/VST3/
 ```
 
-AU：
+AU（Logic Pro 常用）：
 
 ```text
 /Library/Audio/Plug-Ins/Components/
 ```
 
-LV2：
+或者只安装给当前用户：
+
+```text
+~/Library/Audio/Plug-Ins/Components/
+```
+
+LV2（部分宿主支持）：
+
+```text
+/Library/Audio/Plug-Ins/LV2/
+```
+
+或者只安装给当前用户：
 
 ```text
 ~/Library/Audio/Plug-Ins/LV2/
@@ -195,7 +283,7 @@ LV2：
 
 复制后重启 DAW，或重新扫描插件。
 
-## 5. Linux 客户端使用
+## 6. Linux 客户端使用
 
 下载 `sonobus-linux-x64` 后解压：
 
@@ -214,11 +302,22 @@ chmod +x SonoBus 2>/dev/null || chmod +x sonobus 2>/dev/null || true
 插件目录：
 
 ```text
-VST3: ~/.vst3/
-LV2:  ~/.lv2/
+VST3 当前用户目录: ~/.vst3/
+LV2 当前用户目录:  ~/.lv2/
+VST3 全系统目录:   /usr/local/lib/vst3/ 或 /usr/lib/vst3/
+LV2 全系统目录:    /usr/local/lib/lv2/ 或 /usr/lib/lv2/
 ```
 
-## 6. 连接自己的服务器
+新手建议放当前用户目录：
+
+```bash
+mkdir -p ~/.vst3 ~/.lv2
+cp -a SonoBus.vst3 ~/.vst3/
+cp -a SonoBusInstrument.vst3 ~/.vst3/
+cp -a SonoBus.lv2 ~/.lv2/
+```
+
+## 7. 连接自己的服务器
 
 如果用户没有公网 IP，或者公司/家庭网络不能直连，就使用自建服务器中继。
 
@@ -262,7 +361,7 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 | 两个人 `Group Password` 不同 | 进不了同一个房间 |
 | 两个人显示名相同 | Web 和客户端里容易混淆 |
 
-## 7. 使用官方服务器
+## 8. 使用官方服务器
 
 如果你不想用自己的中继服务器，可以继续使用官方 SonoBus。
 
@@ -276,7 +375,7 @@ Relay Server（中继服务器）: <你的服务器IP或域名>:9000
 
 注意：如果继续使用官方服务器，自己的 Linux Web 管理后台无法踢出/封禁这些用户。
 
-## 8. Web 管理员密码和 SonoBus 房间密码不是一回事
+## 9. Web 管理员密码和 SonoBus 房间密码不是一回事
 
 服务器 `.env` 里的：
 
@@ -308,7 +407,7 @@ Group Password
 
 这两个系统互不相同。
 
-## 9. 降低延迟建议
+## 10. 降低延迟建议
 
 英文解释：
 
@@ -332,7 +431,7 @@ Group Password
 
 服务器中继会比 P2P 直连多一跳，这是物理网络决定的。
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### Web 能打开，但 SonoBus 没声音
 

@@ -55,6 +55,8 @@ SonoBus 原本已经支持：
 
 - [docs/download-and-use.md](docs/download-and-use.md)
 
+VST3、AU、LV2 插件应该放哪个目录，也写在这个文档的“插件放哪个目录”章节里。
+
 ## Linux 部署
 
 新手按这个文档一步一步做：
