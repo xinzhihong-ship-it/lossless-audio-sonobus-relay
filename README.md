@@ -175,4 +175,30 @@ npm test
 
 ## 许可证
 
-SonoBus 是 GPL-3.0 with App Store exception 项目。分发本项目修改版客户端时，需要保留上游版权和许可证说明，并提供对应源码。
+本项目基于 SonoBus 二次开发。SonoBus 由 Jesse Chappell 编写，并以 GPLv3 授权，许可证文件见上游仓库：
+
+- [sonosaurus/sonobus](https://github.com/sonosaurus/sonobus)
+- [SonoBus LICENSE](https://raw.githubusercontent.com/sonosaurus/sonobus/main/LICENSE)
+
+你可以：
+
+- Fork。
+- 修改源码。
+- 自己编译。
+- 做二次开发。
+- 免费分发。
+- 收费分发。
+
+但如果把修改后的版本发布给别人使用，需要注意：
+
+- 继续遵守 GPL-3.0 / GPLv3 开源许可证。
+- 公开对应源码。
+- 保留 SonoBus 上游版权和许可证声明。
+- 标明你修改过源码。
+- 不能把基于 SonoBus 的修改版改成闭源商业软件直接卖。
+
+简单说：可以二开，也可以商业化分发，但二开后的发布版本也要开源，用户也必须能拿到源码，并拥有继续修改和再分发的权利。
+
+如果只是本地研究、学习、自己使用，不发布给别人，一般不需要公开源码。
+
+注意：SonoBus 名称、Logo、商标不一定随 GPL 授权。如果发布自己的修改版，建议改名并更换标识，避免让用户误以为是 SonoBus 官方版本。
