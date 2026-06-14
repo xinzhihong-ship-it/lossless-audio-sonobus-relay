@@ -9,6 +9,11 @@ on:
     paths:
       - ".github/workflows/build-windows-asio.yml"
       - "sonobus/**"
+      - "tools/windows-installer/**"
+      - "README.md"
+      - "LICENSE"
+      - "LICENSE_EXCEPTION"
+      - "NOTICE.md"
 
 jobs:
   build-windows-asio:
@@ -59,6 +64,10 @@ jobs:
         working-directory: sonobus
         run: cmake --build build --config Release --parallel
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Collect artifacts
         shell: pwsh
         run: |
@@ -70,8 +79,24 @@ jobs:
           Copy-Item -Force sonobus/LICENSE artifacts/windows-x64-asio/sonobus-LICENSE
           Copy-Item -Force sonobus/LICENSE_EXCEPTION artifacts/windows-x64-asio/sonobus-LICENSE_EXCEPTION
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer-input/SonoBus | Out-Null
+          Copy-Item -Recurse -Force artifacts/windows-x64-asio/* installer-input/SonoBus/
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DSBVERSION="0.1.1" `
+            /DSBASIOSUFFIX="-ASIO" `
+            tools/windows-installer/sonobus-installer.iss
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sonobus-windows-x64-asio
           path: artifacts/windows-x64-asio
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-windows-x64-asio-installer
+          path: installer-output/*.exe

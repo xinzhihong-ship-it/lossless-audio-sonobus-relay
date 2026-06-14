@@ -9,6 +9,11 @@ on:
     paths:
       - ".github/workflows/build-macos.yml"
       - "sonobus/**"
+      - "tools/macos/**"
+      - "README.md"
+      - "LICENSE"
+      - "LICENSE_EXCEPTION"
+      - "NOTICE.md"
 
 jobs:
   build-macos:
@@ -53,8 +58,19 @@ jobs:
           cp -p sonobus/LICENSE_EXCEPTION artifacts/macos-universal/sonobus-LICENSE_EXCEPTION
           ditto -c -k --sequesterRsrc --keepParent artifacts/macos-universal sonobus-macos-universal.zip
 
+      - name: Build pkg installer
+        run: |
+          chmod +x tools/macos/build-pkg.sh
+          tools/macos/build-pkg.sh 0.1.1 sonobus-macos-universal.pkg
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sonobus-macos-universal
           path: sonobus-macos-universal.zip
+
+      - name: Upload pkg installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-macos-universal-installer
+          path: sonobus-macos-universal.pkg

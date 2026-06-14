@@ -47,10 +47,12 @@ SonoBus 原本已经支持：
 | Artifact（构建产物） | 中文说明 | 推荐对象 |
 | --- | --- | --- |
 | `lossless-audio-server-linux-docker` | Linux 服务器 Docker 部署包 | 部署服务器 |
-| `sonobus-windows-x64-asio` | Windows ASIO 版客户端和 VST3 插件 | Windows 专业声卡用户，推荐 |
-| `sonobus-windows-x64` | Windows 普通版客户端和 VST3 插件 | Windows 普通用户 |
-| `sonobus-macos-universal` | macOS 通用版客户端和插件 | Mac 用户 |
-| `sonobus-linux-x64` | Linux 客户端和插件 | Linux 用户 |
+| `sonobus-windows-x64-asio-installer` | Windows ASIO 安装器，自动安装客户端和 VST3 | Windows 专业声卡用户，推荐 |
+| `sonobus-windows-x64-installer` | Windows 普通安装器，自动安装客户端和 VST3 | Windows 普通用户 |
+| `sonobus-macos-universal-installer` | macOS PKG 安装器，自动安装 App 和插件 | Mac 用户 |
+| `sonobus-linux-x64-installer` | Linux DEB 安装包，自动安装客户端和插件 | Ubuntu/Debian Linux 用户 |
+| `sonobus-windows-x64-asio` / `sonobus-windows-x64` | Windows 手动安装包 | 高级用户 |
+| `sonobus-macos-universal` / `sonobus-linux-x64` | macOS/Linux 手动安装包 | 高级用户 |
 
 详细下载和客户端使用见：
 

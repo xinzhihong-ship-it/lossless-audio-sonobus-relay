@@ -40,15 +40,43 @@ https://github.com/xinzhihong-ship-it/lossless-audio-sonobus-relay/actions
 
 | 下载包名 | 中文说明 | 谁用 |
 | --- | --- | --- |
-| `sonobus-windows-x64-asio` | Windows ASIO 版 | Windows 专业声卡用户，推荐 |
-| `sonobus-windows-x64` | Windows 普通版 | Windows 普通用户 |
-| `sonobus-macos-universal` | macOS 通用版 | Mac 用户 |
-| `sonobus-linux-x64` | Linux x64 版 | Linux 用户 |
+| `sonobus-windows-x64-asio-installer` | Windows ASIO 安装器，自动安装客户端和 VST3 | Windows 专业声卡用户，推荐 |
+| `sonobus-windows-x64-installer` | Windows 普通安装器，自动安装客户端和 VST3 | Windows 普通用户 |
+| `sonobus-macos-universal-installer` | macOS PKG 安装器，自动安装 App、VST3、AU、LV2 | Mac 用户 |
+| `sonobus-linux-x64-installer` | Linux DEB 安装包，自动安装客户端、VST3、LV2 | Ubuntu/Debian Linux 用户 |
+| `sonobus-windows-x64-asio` | Windows ASIO 手动包 | 高级用户 |
+| `sonobus-windows-x64` | Windows 普通手动包 | 高级用户 |
+| `sonobus-macos-universal` | macOS 手动包 | 高级用户 |
+| `sonobus-linux-x64` | Linux x64 手动包 | 高级用户 |
 | `lossless-audio-server-linux-docker` | Linux 服务器部署包 | 服务器管理员 |
+
+普通用户优先下载带 `installer` 的安装包，不需要自己复制插件目录。
+
+### 安装器会自动放到哪里
+
+| 系统 | 安装器 | 自动安装内容 |
+| --- | --- | --- |
+| Windows | `.exe` 安装器 | `SonoBus.exe` 安装到程序目录，VST3 插件安装到 `C:\Program Files\Common Files\VST3\` |
+| macOS | `.pkg` 安装器 | `SonoBus.app` 安装到 `/Applications`，VST3/AU/LV2 安装到 `/Library/Audio/Plug-Ins/` |
+| Linux | `.deb` 安装包 | 程序安装到 `/usr/local/bin/sonobus`，VST3/LV2 安装到 `/usr/local/lib/` |
+
+macOS 安装包目前未签名和公证。第一次安装或打开时，如果系统拦截，请在 `系统设置` -> `隐私与安全性` 里允许，或右键打开。
+
+Linux `.deb` 安装命令：
+
+```bash
+sudo apt install ./sonobus-linux-x64.deb
+```
+
+卸载命令：
+
+```bash
+sudo apt remove lossless-audio-sonobus-relay
+```
 
 ## 3. 插件放哪个目录
 
-本项目常用插件格式是 `VST3`、`AU`、`LV2`。不同系统和 DAW 支持的格式不一样，按下面放。
+本项目常用插件格式是 `VST3`、`AU`、`LV2`。如果你下载的是带 `installer` 的安装包，一般不用看这一节，安装器会自动放到对应位置。只有手动包用户才需要按下面复制。
 
 英文解释：
 
@@ -125,18 +153,28 @@ cp -a SonoBus.lv2 ~/.lv2/
 如果你是 Windows 用户，优先下载：
 
 ```text
-sonobus-windows-x64-asio
+sonobus-windows-x64-asio-installer
 ```
 
 如果 ASIO 版打不开或没有 ASIO 声卡，再用：
 
 ```text
-sonobus-windows-x64
+sonobus-windows-x64-installer
 ```
 
 ## 4. Windows 使用
 
-下载 `sonobus-windows-x64-asio` 后解压。
+普通用户下载 `sonobus-windows-x64-asio-installer` 或 `sonobus-windows-x64-installer` 后，双击 `.exe` 安装即可。
+
+安装器会自动安装：
+
+```text
+SonoBus.exe
+SonoBus.vst3
+SonoBusInstrument.vst3
+```
+
+高级用户如果下载 `sonobus-windows-x64-asio` 手动包，解压后会看到：
 
 常见文件：
 
@@ -164,7 +202,7 @@ SonoBusInstrument.vst3
 5. `Audio Input Device`（音频输入设备）选择你的声卡输入。
 6. `Audio Output Device`（音频输出设备）选择你的声卡输出。
 
-### VST3 插件安装
+### 手动包 VST3 插件安装
 
 把这些文件夹复制到 Windows VST3 插件目录：
 
@@ -192,7 +230,19 @@ SonoBusInstrument.vst3
 
 ## 5. macOS 使用
 
-下载 `sonobus-macos-universal` 后解压。
+普通用户下载 `sonobus-macos-universal-installer` 后，双击 `.pkg` 安装即可。
+
+安装器会自动安装：
+
+```text
+/Applications/SonoBus.app
+/Library/Audio/Plug-Ins/VST3/SonoBus.vst3
+/Library/Audio/Plug-Ins/VST3/SonoBusInstrument.vst3
+/Library/Audio/Plug-Ins/Components/SonoBus.component
+/Library/Audio/Plug-Ins/LV2/SonoBus.lv2
+```
+
+高级用户如果下载 `sonobus-macos-universal` 手动包，解压后会看到：
 
 常见文件：
 
@@ -285,7 +335,22 @@ LV2（部分宿主支持）：
 
 ## 6. Linux 客户端使用
 
-下载 `sonobus-linux-x64` 后解压：
+Ubuntu/Debian 用户优先下载 `sonobus-linux-x64-installer`，然后执行：
+
+```bash
+sudo apt install ./sonobus-linux-x64.deb
+```
+
+安装器会自动安装：
+
+```text
+/usr/local/bin/sonobus
+/usr/local/lib/vst3/SonoBus.vst3
+/usr/local/lib/vst3/SonoBusInstrument.vst3
+/usr/local/lib/lv2/SonoBus.lv2
+```
+
+如果下载的是 `sonobus-linux-x64` 手动包，解压：
 
 ```bash
 tar -xzf sonobus-linux-x64.tar.gz

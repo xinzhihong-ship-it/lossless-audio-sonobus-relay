@@ -9,6 +9,11 @@ on:
     paths:
       - ".github/workflows/build-linux-sonobus.yml"
       - "sonobus/**"
+      - "tools/linux/**"
+      - "README.md"
+      - "LICENSE"
+      - "LICENSE_EXCEPTION"
+      - "NOTICE.md"
 
 jobs:
   build-linux-sonobus:
@@ -70,8 +75,19 @@ jobs:
           cp -p sonobus/LICENSE_EXCEPTION artifacts/linux-x64/sonobus-LICENSE_EXCEPTION
           tar -czf sonobus-linux-x64.tar.gz -C artifacts linux-x64
 
+      - name: Build deb installer
+        run: |
+          chmod +x tools/linux/build-deb.sh
+          tools/linux/build-deb.sh 0.1.1 sonobus-linux-x64.deb
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sonobus-linux-x64
           path: sonobus-linux-x64.tar.gz
+
+      - name: Upload deb installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonobus-linux-x64-installer
+          path: sonobus-linux-x64.deb
