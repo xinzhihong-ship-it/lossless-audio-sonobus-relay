@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @lossless-audio/protocol && npm run build -w @lossless-audio/server && npm run build -w @lossless-audio/desktop",
-    "test": "npm run test -ws --if-present",
+    "test": "npm run test -ws --if-present && npm run test:sonobus-relay-state",
+    "test:sonobus-relay-state": "node tools/check-sonobus-relay-state.mjs",
     "dev:server": "npm run dev -w @lossless-audio/server",
     "dev:desktop": "npm run dev -w @lossless-audio/desktop",
     "typecheck": "npm run typecheck -ws --if-present"

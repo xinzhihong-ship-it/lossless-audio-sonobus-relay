@@ -2517,6 +2517,34 @@ void SonobusAudioProcessor::updateSafetyMuting(RemotePeer * peer)
 
 }
 
+void SonobusAudioProcessor::resetTransientRemotePeerState(RemotePeer * peer, bool resetRelayHandshake)
+{
+    if (!peer) return;
+
+    peer->blockedUs = false;
+    peer->connected = false;
+    peer->recvActive = false;
+    peer->sendActive = false;
+    peer->resetDroptime = Time::getMillisecondCounterHiRes();
+    peer->lastDroptime = 0;
+    peer->fastDropRate.resetInitVal(0.0f);
+    peer->resetSafetyMuted = peer->buffertimeMs < 3.0f;
+
+    if (resetRelayHandshake && peer->endpoint && peer->endpoint->relayed) {
+        peer->remoteSourceId = AOO_ID_NONE;
+        peer->remoteSinkId = AOO_ID_NONE;
+        peer->oursink->uninvite_all();
+        peer->oursource->remove_all();
+        peer->latencysink->uninvite_all();
+        peer->echosink->uninvite_all();
+        peer->latencysource->remove_all();
+        peer->echosource->remove_all();
+        peer->latencysource->stop();
+        peer->echosource->stop();
+        peer->activeLatencyTest = false;
+    }
+}
+
 void SonobusAudioProcessor::doReceiveData()
 {
     // receive from udp port, and parse packet
@@ -3125,7 +3153,17 @@ bool SonobusAudioProcessor::handleOtherMessage(EndpointState * endpoint, const c
                     }
                     
                     if (retind >= 0) {
-                        setRemotePeerSendActive(retind, false);
+                        if (blocked) {
+                            setRemotePeerSendActive(retind, false);
+                        }
+                        else {
+                            peer->sendAllow = !mMainSendMute.get();
+                            peer->sendAllowCache = true;
+                            peer->recvAllow = !mMainRecvMute.get();
+                            peer->recvAllowCache = true;
+                            setRemotePeerSendActive(retind, peer->sendAllow);
+                            peer->oursink->invite_source(endpoint, peer->remoteSourceId >= 0 ? peer->remoteSourceId : 0, endpoint_send);
+                        }
                     }
                 }
             }
@@ -4726,7 +4764,12 @@ int SonobusAudioProcessor::connectRemotePeerEndpoint(EndpointState * endpoint, c
         return 0;
     }
 
+    RemotePeer * existingRemote = findRemotePeer(endpoint, AOO_ID_NONE);
     RemotePeer * remote = doAddRemotePeerIfNecessary(endpoint, AOO_ID_NONE, username, groupname); // get new one
+
+    if (existingRemote && endpoint->relayed) {
+        resetTransientRemotePeerState(remote, true);
+    }
 
     remote->recvAllow = !mMainRecvMute.get();
     

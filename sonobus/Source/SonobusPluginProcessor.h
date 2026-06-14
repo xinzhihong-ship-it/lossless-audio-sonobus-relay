@@ -892,6 +892,7 @@ private:
     void sendPingEvent(RemotePeer * peer);
 
     void updateSafetyMuting(RemotePeer * peer);
+    void resetTransientRemotePeerState(RemotePeer * peer, bool resetRelayHandshake);
 
     void setupSourceFormat(RemotePeer * peer, aoo::isource * source, bool latencymode=false);
     bool formatInfoToAooFormat(const AudioCodecFormatInfo & info, int channels, aoo_format_storage & retformat);
