@@ -17,6 +17,61 @@ static Typeface::Ptr createBundledUniversalTypeface()
                                               BinaryData::GoNotoKurrentRegular_ttfSize);
 }
 
+#if JUCE_WINDOWS
+static Typeface::Ptr createFirstAvailableSystemTypeface (const Font& baseFont, const StringArray& typefaceNames)
+{
+    for (const auto& typefaceName : typefaceNames)
+    {
+        Font font (baseFont);
+        font.setTypefaceName (typefaceName);
+
+        if (auto typeface = Typeface::createSystemTypefaceFor (font))
+        {
+            if (typeface->getName().equalsIgnoreCase (typefaceName))
+                return typeface;
+        }
+    }
+
+    return {};
+}
+
+static Typeface::Ptr createWindowsCjkTypeface (const Font& baseFont, const String& languageCode)
+{
+    if (languageCode.startsWith ("zh"))
+    {
+        return createFirstAvailableSystemTypeface (baseFont,
+                                                   { "Microsoft YaHei UI",
+                                                     "Microsoft YaHei",
+                                                     "DengXian",
+                                                     "SimHei",
+                                                     "SimSun",
+                                                     "NSimSun",
+                                                     "Arial Unicode MS" });
+    }
+
+    if (languageCode.startsWith ("ja"))
+    {
+        return createFirstAvailableSystemTypeface (baseFont,
+                                                   { "Yu Gothic UI",
+                                                     "Yu Gothic",
+                                                     "Meiryo",
+                                                     "MS Gothic",
+                                                     "Arial Unicode MS" });
+    }
+
+    if (languageCode.startsWith ("ko"))
+    {
+        return createFirstAvailableSystemTypeface (baseFont,
+                                                   { "Malgun Gothic",
+                                                     "Dotum",
+                                                     "Gulim",
+                                                     "Arial Unicode MS" });
+    }
+
+    return {};
+}
+#endif
+
 #if OLDFONTSTUFF
 
 float SonoLookAndFeel::fontScale = 1.0f;
@@ -198,7 +253,11 @@ Typeface::Ptr SonoLookAndFeel::getTypefaceForFont (const Font& font)
         {
             if (slang.startsWith("ja")) {
                 DBG("Using japanese");
-#if JUCE_WINDOWS || JUCE_LINUX
+#if JUCE_WINDOWS
+                if (auto typeface = createWindowsCjkTypeface (font, slang))
+                    return typeface;
+                return createBundledUniversalTypeface();
+#elif JUCE_LINUX
                 return createBundledUniversalTypeface();
 #else
                 Font jfont(font);
@@ -213,7 +272,11 @@ Typeface::Ptr SonoLookAndFeel::getTypefaceForFont (const Font& font)
             }
             else if (slang.startsWith("ko")) {
                 DBG("Using korean");
-#if JUCE_WINDOWS || JUCE_LINUX
+#if JUCE_WINDOWS
+                if (auto typeface = createWindowsCjkTypeface (font, slang))
+                    return typeface;
+                return createBundledUniversalTypeface();
+#elif JUCE_LINUX
                 return createBundledUniversalTypeface();
 #else
                 Font jfont(font);
@@ -228,7 +291,11 @@ Typeface::Ptr SonoLookAndFeel::getTypefaceForFont (const Font& font)
             }
             else if (slang.startsWith("zh")) {
                 DBG("Using chinese");
-#if JUCE_WINDOWS || JUCE_LINUX || JUCE_ANDROID
+#if JUCE_WINDOWS
+                if (auto typeface = createWindowsCjkTypeface (font, slang))
+                    return typeface;
+                return createBundledUniversalTypeface();
+#elif JUCE_LINUX || JUCE_ANDROID
                 return createBundledUniversalTypeface();
 #else
                 Font jfont(font);

@@ -5326,16 +5326,20 @@ bool SonobusAudioProcessorEditor::setupLocalisation(const String & overrideLang)
     int retfbytes = 0;
     String region = SystemStats::getUserRegion();
 
-    String sflang = lang.initialSectionNotContaining("_").toLowerCase().replace("-", "");
+    String sflang = lang.initialSectionNotContaining("_").toLowerCase();
     String slang = lang.initialSectionNotContaining("_").initialSectionNotContaining("-").toLowerCase();
 
     String resname = String("localized_") + slang + String("_txt");
-    String resfname = String("localized_") + sflang + String("_txt");
+    String resfname = String("localized_") + sflang.removeCharacters("-") + String("_txt");
+    String resfnameAlt = String("localized_") + sflang.replace("-", "_") + String("_txt");
     String resfullfilename = String("localized_") + lang.toLowerCase() + String(".txt");
     String resfilename = String("localized_") + slang + String(".txt");
 
     const char * rawdata = BinaryData::getNamedResource(resname.toRawUTF8(), retbytes);
     const char * rawdataf = BinaryData::getNamedResource(resfname.toRawUTF8(), retfbytes);
+    if (!rawdataf && resfnameAlt != resfname) {
+        rawdataf = BinaryData::getNamedResource(resfnameAlt.toRawUTF8(), retfbytes);
+    }
 
     File   userfilename;
     if (JUCEApplication::isStandaloneApp() && mSettingsFolder.getFullPathName().isNotEmpty()) {
@@ -6040,4 +6044,3 @@ void SonobusAudioProcessorEditor::SonobusMenuBarModel::menuItemSelected (int men
     }
 #endif
 }
-
