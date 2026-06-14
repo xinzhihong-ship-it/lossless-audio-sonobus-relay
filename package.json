@@ -2,6 +2,7 @@
   "name": "lossless-audio-relay",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "description": "Cross-platform lossless realtime audio relay for NATed clients.",
   "workspaces": [
     "packages/*"

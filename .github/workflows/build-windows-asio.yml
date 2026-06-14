@@ -66,6 +66,9 @@ jobs:
           Copy-Item -Recurse -Force sonobus/build/SonoBus_artefacts/Release/Standalone/SonoBus.exe artifacts/windows-x64-asio/
           Copy-Item -Recurse -Force sonobus/build/SonoBus_artefacts/Release/VST3/SonoBus.vst3 artifacts/windows-x64-asio/
           Copy-Item -Recurse -Force sonobus/build/SonoBusInst_artefacts/Release/VST3/SonoBusInstrument.vst3 artifacts/windows-x64-asio/
+          Copy-Item -Force README.md,LICENSE,LICENSE_EXCEPTION,NOTICE.md artifacts/windows-x64-asio/
+          Copy-Item -Force sonobus/LICENSE artifacts/windows-x64-asio/sonobus-LICENSE
+          Copy-Item -Force sonobus/LICENSE_EXCEPTION artifacts/windows-x64-asio/sonobus-LICENSE_EXCEPTION
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

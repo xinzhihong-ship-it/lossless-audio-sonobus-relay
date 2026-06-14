@@ -180,6 +180,8 @@ npm test
 - [sonosaurus/sonobus](https://github.com/sonosaurus/sonobus)
 - [SonoBus LICENSE](https://raw.githubusercontent.com/sonosaurus/sonobus/main/LICENSE)
 
+本仓库根目录包含 GPLv3 许可证文本 [LICENSE](LICENSE)、App Store 例外 [LICENSE_EXCEPTION](LICENSE_EXCEPTION) 和第三方/修改说明 [NOTICE.md](NOTICE.md)。GitHub Actions 生成的客户端和服务器下载包也会随包附带这些文件，以及 SonoBus 上游 `LICENSE` 和 `LICENSE_EXCEPTION`。
+
 你可以：
 
 - Fork。

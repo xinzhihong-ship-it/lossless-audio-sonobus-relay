@@ -48,6 +48,9 @@ jobs:
           if [ -d sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 ]; then
             cp -pR sonobus/build/SonoBus_artefacts/Release/LV2/SonoBus.lv2 artifacts/macos-universal/
           fi
+          cp -p README.md LICENSE LICENSE_EXCEPTION NOTICE.md artifacts/macos-universal/
+          cp -p sonobus/LICENSE artifacts/macos-universal/sonobus-LICENSE
+          cp -p sonobus/LICENSE_EXCEPTION artifacts/macos-universal/sonobus-LICENSE_EXCEPTION
           ditto -c -k --sequesterRsrc --keepParent artifacts/macos-universal sonobus-macos-universal.zip
 
       - name: Upload artifacts
