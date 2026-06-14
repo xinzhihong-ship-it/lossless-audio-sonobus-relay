@@ -1,8 +1,17 @@
 FROM debian:bookworm-slim AS build
-RUN sed -i \
-  -e 's|http://deb.debian.org/debian-security|http://mirrors.tencent.com/debian-security|g' \
-  -e 's|http://deb.debian.org/debian|http://mirrors.tencent.com/debian|g' \
-  /etc/apt/sources.list.d/debian.sources
+RUN printf '%s\n' \
+  'Types: deb' \
+  'URIs: http://mirrors.tencent.com/debian' \
+  'Suites: bookworm bookworm-updates' \
+  'Components: main' \
+  'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+  '' \
+  'Types: deb' \
+  'URIs: http://mirrors.tencent.com/debian-security' \
+  'Suites: bookworm-security' \
+  'Components: main' \
+  'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+  > /etc/apt/sources.list.d/debian.sources
 WORKDIR /src
 RUN apt-get update \
   && apt-get install -y --no-install-recommends g++ ca-certificates \
