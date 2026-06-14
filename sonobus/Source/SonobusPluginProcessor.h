@@ -334,7 +334,7 @@ public:
     
     EndpointState * findOrAddEndpoint(const String & host, int port);
     EndpointState * findOrAddRawEndpoint(void * rawaddr);
-    EndpointState * findOrAddRelayedEndpoint(const String & host, int port, const String & directHost, int directPort, const String & username = {});
+    EndpointState * findOrAddRelayedEndpoint(const String & host, int port, const String & directHost, int directPort, const String & username = {}, const String & groupname = {});
 
     int getUdpLocalPort() const { return mUdpLocalPort; }
     IPAddress getLocalIPAddress() const { return mLocalIPAddress; }

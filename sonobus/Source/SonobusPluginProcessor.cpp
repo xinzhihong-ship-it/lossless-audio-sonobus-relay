@@ -2442,14 +2442,16 @@ SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddEndpoint(
     return endpoint;
 }
 
-SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEndpoint(const String & host, int port, const String & directHost, int directPort, const String & username)
+SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEndpoint(const String & host, int port, const String & directHost, int directPort, const String & username, const String & groupname)
 {
     const ScopedLock sl (mEndpointsLock);
 
     EndpointState * endpoint = nullptr;
+    const String relayGroup = groupname.isNotEmpty() ? groupname : mCurrentJoinedGroup;
+    const String relaySource = mCurrentUsername;
 
     for (auto ep : mEndpoints) {
-        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->relayGroupName == mCurrentJoinedGroup && ep->relayPeerName == username) {
+        if (ep->relayed && ep->ipaddr == host && ep->port == port && ep->relayGroupName == relayGroup && ep->relayPeerName == username) {
             endpoint = ep;
             break;
         }
@@ -2463,15 +2465,23 @@ SonobusAudioProcessor::EndpointState * SonobusAudioProcessor::findOrAddRelayedEn
         endpoint->directIpaddr = directHost;
         endpoint->directPort = directPort;
         endpoint->relayPeerName = username;
-        endpoint->relaySourceName = mCurrentUsername;
-        endpoint->relayGroupName = mCurrentJoinedGroup;
+        endpoint->relaySourceName = relaySource;
+        endpoint->relayGroupName = relayGroup;
         DBG("Added relayed endpoint for " << directHost << ":" << directPort << " via " << host << ":" << port);
 
         auto registerPacket = makeSonoBusRelayPacket(*endpoint, "", 0, 0);
         endpoint->owner->write(*(endpoint->peer), static_cast<const char *>(registerPacket.getData()), (int)registerPacket.getSize());
-    } else if (endpoint->directIpaddr.isEmpty() && directHost.isNotEmpty()) {
-        endpoint->directIpaddr = directHost;
-        endpoint->directPort = directPort;
+    } else {
+        if (endpoint->directIpaddr.isEmpty() && directHost.isNotEmpty()) {
+            endpoint->directIpaddr = directHost;
+            endpoint->directPort = directPort;
+        }
+        if (endpoint->relaySourceName.isEmpty()) {
+            endpoint->relaySourceName = relaySource;
+        }
+        if (endpoint->relayGroupName.isEmpty()) {
+            endpoint->relayGroupName = relayGroup;
+        }
     }
     return endpoint;
 }
@@ -2537,7 +2547,7 @@ void SonobusAudioProcessor::doReceiveData()
             }
         }
         if (!endpoint || !endpoint->relayed) {
-            endpoint = findOrAddRelayedEndpoint(senderIP, senderPort, "", 0, relaySource);
+            endpoint = findOrAddRelayedEndpoint(senderIP, senderPort, "", 0, relaySource, relayGroup);
         }
         if (relayPayload.getSize() > (size_t)AOO_MAXPACKETSIZE) {
             DBG("SonoBus relay payload too large");
@@ -4579,7 +4589,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
                 DBG("Peer attempting to join group " <<  e->group << " - user " << e->user);
 
                 if (mRelayServerEnabled && mAutoconnectGroupPeers) {
-                    EndpointState * endpoint = findOrAddRelayedEndpoint(mRelayServerHost, mRelayServerPort, "", 0, CharPointer_UTF8 (e->user));
+                    EndpointState * endpoint = findOrAddRelayedEndpoint(mRelayServerHost, mRelayServerPort, "", 0, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group));
                     if (endpoint) {
                         if (isEndpointBlocked(endpoint)) {
                             clientListeners.call(&SonobusAudioProcessor::ClientListener::aooClientPeerJoinBlocked, this, CharPointer_UTF8 (e->group), CharPointer_UTF8 (e->user), endpoint->ipaddr, endpoint->port);
@@ -4608,7 +4618,7 @@ int32_t SonobusAudioProcessor::handleClientEvents(const aoo_event ** events, int
 
                 EndpointState * endpoint = findOrAddRawEndpoint(e->address);
                 if (endpoint && mRelayServerEnabled) {
-                    endpoint = findOrAddRelayedEndpoint(mRelayServerHost, mRelayServerPort, endpoint->ipaddr, endpoint->port, CharPointer_UTF8 (e->user));
+                    endpoint = findOrAddRelayedEndpoint(mRelayServerHost, mRelayServerPort, endpoint->ipaddr, endpoint->port, CharPointer_UTF8 (e->user), CharPointer_UTF8 (e->group));
                 }
                 if (endpoint) {
                  
