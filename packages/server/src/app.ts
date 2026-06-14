@@ -1066,7 +1066,7 @@ const adminPageHtml = String.raw`<!doctype html>
         const lastSeen = connection.lastSeenAt || connection.joinedAt || connection.createdAt || "-";
         const relayStats = displayRelayStats(connection);
         tr.innerHTML =
-          cell("类型", displayConnectionType(connection.type), connection.type) +
+          cell("类型", displayConnectionType(connection), connection.type) +
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
@@ -1106,7 +1106,7 @@ const adminPageHtml = String.raw`<!doctype html>
         const user = ban.user || ban.userId || "-";
         const address = ban.address || "-";
         tr.innerHTML =
-          cell("类型", displayConnectionType(ban.type), ban.type) +
+          cell("类型", displayConnectionType(ban), ban.type) +
           cell("房间/群组", room, room) +
           cell("用户", user, user) +
           cell("IP", address, address) +
@@ -1191,18 +1191,22 @@ const adminPageHtml = String.raw`<!doctype html>
       return expiresAt ? new Date(expiresAt).toLocaleString() : "永久";
     }
 
-    function displayConnectionType(type) {
+    function displayConnectionType(connection) {
       const labels = {
         "websocket": "桌面端 WebSocket",
         "udp-session": "桌面端 UDP 中继",
         "sonobus-udp": "SonoBus 音频中继",
         "sonobus-connection": "SonoBus 房间连接"
       };
+      const type = typeof connection === "string" ? connection : connection.type;
+      if (type === "sonobus-connection" && connection.hasRelay) {
+        return "SonoBus 房间连接 + 音频中继";
+      }
       return labels[type] || type || "-";
     }
 
     function displayRelayStats(connection) {
-      if (connection.type !== "sonobus-udp") return "-";
+      if (connection.type !== "sonobus-udp" && !connection.hasRelay) return "-";
       return "收 " + (connection.packetsReceived || 0)
         + " / 转 " + (connection.packetsForwarded || 0)
         + " / 末包 " + (connection.lastPacketBytes || 0) + "B"
