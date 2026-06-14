@@ -1,4 +1,5 @@
 #define InstallerName "LosslessAudioSonoBusRelay"
+#define SourceRoot GetEnv("GITHUB_WORKSPACE")
 
 [Setup]
 AppId={{E8B37F25-9855-4B70-B5C6-79CCF5F97A20}
@@ -17,8 +18,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
-LicenseFile=installer-input\SonoBus\LICENSE
-OutputDir=installer-output
+LicenseFile={#SourceRoot}\installer-input\SonoBus\LICENSE
+OutputDir={#SourceRoot}\installer-output
 OutputBaseFilename={#InstallerName}-{#SBVERSION}{#SBASIOSUFFIX}-Setup
 
 [Languages]
@@ -33,15 +34,15 @@ Name: "app"; Description: "Standalone application"; Types: full custom; Flags: f
 Name: "vst3"; Description: "VST3 plugins"; Types: full custom
 
 [Files]
-Source: "installer-input\SonoBus\SonoBus.exe"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\README.md"; DestDir: "{app}"; Components: app; Flags: ignoreversion isreadme
-Source: "installer-input\SonoBus\LICENSE"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\LICENSE_EXCEPTION"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\NOTICE.md"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\sonobus-LICENSE"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\sonobus-LICENSE_EXCEPTION"; DestDir: "{app}"; Components: app; Flags: ignoreversion
-Source: "installer-input\SonoBus\SonoBus.vst3\*"; DestDir: "{commoncf}\VST3\SonoBus.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "installer-input\SonoBus\SonoBusInstrument.vst3\*"; DestDir: "{commoncf}\VST3\SonoBusInstrument.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceRoot}\installer-input\SonoBus\SonoBus.exe"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\README.md"; DestDir: "{app}"; Components: app; Flags: ignoreversion isreadme
+Source: "{#SourceRoot}\installer-input\SonoBus\LICENSE"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\LICENSE_EXCEPTION"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\NOTICE.md"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\sonobus-LICENSE"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\sonobus-LICENSE_EXCEPTION"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "{#SourceRoot}\installer-input\SonoBus\SonoBus.vst3\*"; DestDir: "{commoncf}\VST3\SonoBus.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceRoot}\installer-input\SonoBus\SonoBusInstrument.vst3\*"; DestDir: "{commoncf}\VST3\SonoBusInstrument.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SonoBus"; Filename: "{app}\SonoBus.exe"
