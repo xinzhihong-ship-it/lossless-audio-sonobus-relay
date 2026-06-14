@@ -1,6 +1,6 @@
 # Lossless Audio SonoBus Relay
 
-基于 SonoBus 改造的跨平台无损实时音频传输项目。它包含：
+基于 SonoBus 改造的跨平台无损实时音频传输项目，本项目使用 Codex 辅助改造。它包含：
 
 - SonoBus 改造版客户端：Windows、macOS、Linux。
 - DAW 插件：VST3、AU、LV2，按平台支持不同格式。
@@ -12,6 +12,7 @@
 ## 项目基于 SonoBus 改造
 
 本项目的音频客户端基于开源项目 [SonoBus](https://github.com/sonosaurus/sonobus) 改造。
+本项目使用 Codex 辅助完成服务端、客户端中继逻辑、Web 管理后台、文档和构建流程改造。
 
 SonoBus 原本已经支持：
 

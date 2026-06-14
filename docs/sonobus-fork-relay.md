@@ -1,6 +1,6 @@
 # SonoBus Fork Relay
 
-本仓库的 `sonobus/` 目录是基于 SonoBus 上游源码的改造版本。SonoBus 自身已经支持 Standalone、AU/VST 等形态，适合 DAW/机架加载；本次改造只动网络中继层。
+本仓库的 `sonobus/` 目录是基于 SonoBus 上游源码的改造版本，本项目使用 Codex 辅助改造。SonoBus 自身已经支持 Standalone、AU/VST 等形态，适合 DAW/机架加载；本次改造只动网络中继层。
 
 本文档只使用占位地址。不要把真实公网 IP 写进源码、README、截图或公开 Issue。
 
