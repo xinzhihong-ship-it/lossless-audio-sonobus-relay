@@ -85,7 +85,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path installer-input/SonoBus | Out-Null
           Copy-Item -Recurse -Force artifacts/windows-x64-asio/* installer-input/SonoBus/
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
-            /DSBVERSION="0.1.1" `
+            /DSBVERSION="0.1.3" `
             /DSBASIOSUFFIX="-ASIO" `
             tools/windows-installer/sonobus-installer.iss
 
