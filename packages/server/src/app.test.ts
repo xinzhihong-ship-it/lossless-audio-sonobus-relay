@@ -235,7 +235,7 @@ test("udp relay forwards native SonoBus SBR1 packets to learned group peers", as
   }
 });
 
-test("udp relay broadcasts native SonoBus payloads even when a stale target is present", async () => {
+test("udp relay routes targeted native SonoBus payloads only to the named peer", async () => {
   const app = await createApp({
     jwtSecret: "test-secret",
     adminUsername: "admin",
@@ -255,22 +255,23 @@ test("udp relay broadcasts native SonoBus payloads even when a stale target is p
 
   try {
     const adminToken = await login(baseUrl, "admin", "admin-pass");
-    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "sonobus-broadcast-room" });
+    const roomResponse = await post<{ room: { id: string } }>(baseUrl, "/rooms", adminToken, { name: "sonobus-target-room" });
     const relayInfo = await post<{ udpPort: number }>(baseUrl, `/rooms/${roomResponse.room.id}/relay-session`, adminToken, {});
 
     await Promise.all([bindUdp(aliceSocket), bindUdp(bobSocket), bindUdp(carolSocket)]);
+    aliceSocket.send(encodeSbr1({ group: "band", source: "alice" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
     bobSocket.send(encodeSbr1({ group: "band", source: "bob" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
     carolSocket.send(encodeSbr1({ group: "band", source: "carol" }, Buffer.alloc(0), 0), relayInfo.udpPort, "127.0.0.1");
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     const payload = Buffer.from([5, 4, 3, 2, 1]);
-    const packet = encodeSbr1({ group: "band", source: "alice", target: "old-bob-endpoint" }, payload);
+    const packet = encodeSbr1({ group: "band", source: "alice", target: "bob" }, payload);
     const bobReceived = onceUdpMessage(bobSocket);
     const carolReceived = onceUdpMessage(carolSocket);
     aliceSocket.send(packet, relayInfo.udpPort, "127.0.0.1");
 
     assert.deepEqual(await bobReceived, packet);
-    assert.deepEqual(await carolReceived, packet);
+    await assert.rejects(carolReceived, /timed out waiting for UDP message/);
   } finally {
     aliceSocket.close();
     bobSocket.close();

@@ -332,7 +332,12 @@ export class UdpRelay {
       return true;
     }
 
-    const targets = [...this.rawPeers.values()].filter((peer) => peer.group === packet.header.group && peer.user !== packet.header.source);
+    const targets = [...this.rawPeers.values()].filter((peer) => {
+      if (peer.group !== packet.header.group || peer.user === packet.header.source) {
+        return false;
+      }
+      return !packet.header.target || peer.user === packet.header.target;
+    });
     let forwardCount = 0;
     let forwardBytes = 0;
 
