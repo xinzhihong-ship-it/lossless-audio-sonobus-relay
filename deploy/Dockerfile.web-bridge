@@ -1,0 +1,44 @@
+FROM debian:bookworm-slim AS build
+RUN printf '%s\n' \
+  'Types: deb' \
+  'URIs: http://mirrors.tencent.com/debian' \
+  'Suites: bookworm bookworm-updates' \
+  'Components: main' \
+  'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+  '' \
+  'Types: deb' \
+  'URIs: http://mirrors.tencent.com/debian-security' \
+  'Suites: bookworm-security' \
+  'Components: main' \
+  'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+  > /etc/apt/sources.list.d/debian.sources
+WORKDIR /src
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends g++ ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY sonobus/deps/aoo ./sonobus/deps/aoo
+COPY tools/web-bridge ./tools/web-bridge
+RUN g++ -std=c++17 -O2 -pthread \
+  -Isonobus/deps/aoo/lib \
+  -Isonobus/deps/aoo/lib/src \
+  -Isonobus/deps/aoo/deps \
+  tools/web-bridge/main.cpp \
+  sonobus/deps/aoo/lib/src/client.cpp \
+  sonobus/deps/aoo/lib/src/common.cpp \
+  sonobus/deps/aoo/lib/src/net_utils.cpp \
+  sonobus/deps/aoo/lib/src/time.cpp \
+  sonobus/deps/aoo/lib/src/sync.cpp \
+  sonobus/deps/aoo/lib/src/source.cpp \
+  sonobus/deps/aoo/lib/src/sink.cpp \
+  sonobus/deps/aoo/lib/src/codec_pcm.cpp \
+  -x c++ sonobus/deps/aoo/deps/md5/md5.c -x none \
+  sonobus/deps/aoo/deps/oscpack/osc/OscOutboundPacketStream.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscPrintReceivedElements.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscReceivedElements.cpp \
+  sonobus/deps/aoo/deps/oscpack/osc/OscTypes.cpp \
+  -o /usr/local/bin/sonobus-web-bridge
+
+FROM debian:bookworm-slim AS runtime
+COPY --from=build /usr/local/bin/sonobus-web-bridge /usr/local/bin/sonobus-web-bridge
+EXPOSE 18100/tcp
+CMD ["/usr/local/bin/sonobus-web-bridge"]

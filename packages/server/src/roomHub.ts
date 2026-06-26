@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import { decodeAudioFrame, type AudioFormat, type RoomMember, type ServerJsonMessage } from "@lossless-audio/protocol";
+import { decodeAudioFrame, type AudioFormat, type DecodedAudioFrame, type RoomMember, type ServerJsonMessage } from "@lossless-audio/protocol";
 
 type Client = {
   roomId: string;
@@ -29,12 +29,19 @@ export type WebSocketKickRequest = {
   username?: string;
 };
 
+export type BridgeRoomMember = RoomMember & {
+  kind?: "sonobus-native";
+};
+
 type HubOptions = {
   maxBytesPerSecondPerClient: number;
+  audioFrameSink?: (frame: DecodedAudioFrame, sender: WebSocketConnection) => void | Promise<void>;
 };
 
 export class RoomHub {
   private clientsByRoom = new Map<string, Map<string, Client>>();
+  private bridgeStreamKeysByRoom = new Map<string, Set<string>>();
+  private bridgeMembersByRoom = new Map<string, Map<string, BridgeRoomMember>>();
 
   constructor(private options: HubOptions) {}
 
@@ -84,7 +91,10 @@ export class RoomHub {
   }
 
   members(roomId: string): RoomMember[] {
-    return [...(this.clientsByRoom.get(roomId)?.values() ?? [])].map((client) => this.member(client));
+    return [
+      ...[...(this.clientsByRoom.get(roomId)?.values() ?? [])].map((client) => this.member(client)),
+      ...[...(this.bridgeMembersByRoom.get(roomId)?.values() ?? [])]
+    ];
   }
 
   connections(): WebSocketConnection[] {
@@ -99,6 +109,57 @@ export class RoomHub {
         joinedAt: client.joinedAt
       }))
     );
+  }
+
+  broadcastBridgeAudioFrame(roomId: string, member: RoomMember, raw: Buffer): void {
+    const room = this.clientsByRoom.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    this.rememberBridgeMember(roomId, member);
+    const streamKey = `${member.userId}:${member.streamId ?? ""}:${member.format?.sampleRate ?? ""}:${member.format?.bitDepth ?? ""}:${member.format?.channels ?? ""}`;
+    let streamKeys = this.bridgeStreamKeysByRoom.get(roomId);
+    if (!streamKeys) {
+      streamKeys = new Set();
+      this.bridgeStreamKeysByRoom.set(roomId, streamKeys);
+    }
+    if (!streamKeys.has(streamKey)) {
+      streamKeys.add(streamKey);
+      this.broadcastJson(roomId, { type: "stream_format", member });
+    }
+
+    for (const client of room.values()) {
+      if (client.socket.readyState === WebSocket.OPEN) {
+        client.socket.send(raw, { binary: true });
+      }
+    }
+  }
+
+  publishBridgeMembers(roomId: string, members: RoomMember[]): void {
+    const remembered = this.bridgeMembersByRoom.get(roomId);
+    const nextKeys = new Set(members.map((member) => member.userId));
+    if (remembered) {
+      for (const userId of remembered.keys()) {
+        if (!nextKeys.has(userId)) {
+          remembered.delete(userId);
+          this.broadcastJson(roomId, { type: "member_left", userId });
+        }
+      }
+      if (remembered.size === 0) {
+        this.bridgeMembersByRoom.delete(roomId);
+      }
+    }
+
+    for (const member of members) {
+      const previous = this.bridgeMembersByRoom.get(roomId)?.get(member.userId);
+      this.rememberBridgeMember(roomId, member);
+      if (!previous) {
+        this.broadcastJson(roomId, { type: "member_joined", member });
+      } else if (JSON.stringify(previous) !== JSON.stringify(member)) {
+        this.broadcastJson(roomId, { type: "stream_format", member });
+      }
+    }
   }
 
   kick(request: WebSocketKickRequest): number {
@@ -138,6 +199,15 @@ export class RoomHub {
     }
   }
 
+  private rememberBridgeMember(roomId: string, member: RoomMember): void {
+    let roomMembers = this.bridgeMembersByRoom.get(roomId);
+    if (!roomMembers) {
+      roomMembers = new Map();
+      this.bridgeMembersByRoom.set(roomId, roomMembers);
+    }
+    roomMembers.set(member.userId, { ...member, kind: "sonobus-native" });
+  }
+
   private handleJson(client: Client, text: string): void {
     const message = JSON.parse(text) as { type?: string; streamId?: string; format?: AudioFormat };
     if (message.type !== "stream_format" || !message.streamId || !message.format) {
@@ -161,6 +231,15 @@ export class RoomHub {
       bitDepth: decoded.header.bitDepth,
       channels: decoded.header.channels
     };
+    void this.options.audioFrameSink?.(decoded, {
+      type: "websocket",
+      roomId: sender.roomId,
+      userId: sender.userId,
+      username: sender.username,
+      streamId: sender.streamId,
+      format: sender.format,
+      joinedAt: sender.joinedAt
+    });
 
     const room = this.clientsByRoom.get(sender.roomId);
     if (!room) {

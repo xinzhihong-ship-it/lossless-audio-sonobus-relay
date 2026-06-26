@@ -6,13 +6,14 @@
 
 ## 1. 部署后有什么
 
-部署完成后，服务器会运行 4 个服务：
+部署完成后，服务器会运行 5 个服务：
 
 | 服务名 | 中文意思 | 作用 |
 | --- | --- | --- |
 | `postgres` | PostgreSQL 数据库 | 保存管理员账号、房间、封禁列表 |
 | `server` | Node.js 管理服务 | Web 后台、API、UDP relay |
 | `connection-server` | SonoBus 连接服务器 | 让 SonoBus 用户进入同一个 group，并支持踢出/封禁 |
+| `web-bridge` | Web-SonoBus 桥接服务 | 作为 SonoBus 用户加入 group，为浏览器和原生客户端互通做桥接 |
 | `caddy` | HTTP/HTTPS 反向代理 | 对外提供 Web 管理页面 |
 
 端口：
@@ -197,6 +198,72 @@ ls -lh /home/ubuntu
 
 如果你看到的文件名不是 `lossless-audio-server-linux-docker.tar.gz`，就把命令里的文件名改成实际名字。
 
+### 已经部署过旧服务端，升级到支持 Web 加入
+
+如果你的 Linux 服务器已经按旧版本部署在 `/opt/lossless-audio`，不要删除 `deploy/.env`，也不要删除 Docker volume。直接替换程序文件并重建容器即可，数据库、管理员密码、封禁列表都会保留。
+
+先 SSH 登录服务器：
+
+```bash
+sudo -i
+cd /opt/lossless-audio
+```
+
+备份旧配置：
+
+```bash
+cp deploy/.env /root/lossless-audio.env.backup.$(date +%Y%m%d-%H%M%S)
+```
+
+把新的 `lossless-audio-server-linux-docker.tar.gz` 上传到 `/home/ubuntu/` 后，执行：
+
+```bash
+tar -xzf /home/ubuntu/lossless-audio-server-linux-docker.tar.gz -C /opt/lossless-audio --strip-components=1
+```
+
+如果你是自己从源码打包上传 `/home/ubuntu/lossless-audio.tar.gz`，执行：
+
+```bash
+tar -xzf /home/ubuntu/lossless-audio.tar.gz -C /opt/lossless-audio
+```
+
+确认旧 `.env` 还在：
+
+```bash
+test -f /opt/lossless-audio/deploy/.env && echo ".env OK"
+```
+
+重建并启动：
+
+```bash
+cd /opt/lossless-audio/deploy
+docker compose up -d --build
+```
+
+检查服务：
+
+```bash
+docker compose ps
+docker compose ps web-bridge
+curl -i http://127.0.0.1/health
+curl -s http://127.0.0.1/web | grep "Web 加入音频房间"
+docker compose logs --tail=50 web-bridge
+```
+
+浏览器打开：
+
+```text
+http://<你的服务器IP>/web
+```
+
+如果你有域名和 HTTPS：
+
+```text
+https://<你的域名>/web
+```
+
+注意：这个升级会让浏览器用户进入 Web 音频房间，不需要安装客户端或插件。`web-bridge` 服务会作为 SonoBus 用户连接 Connection Server 并加入 `WEB_BRIDGE_GROUP`，并负责浏览器 LPCM 和 SonoBus/AoO source/sink 的转换。Web 页面填写的房间名要和 `WEB_BRIDGE_GROUP` 一致，才能和同一个原生 SonoBus group 互通。
+
 ## 6. 创建 .env 配置
 
 进入部署目录：
@@ -225,6 +292,9 @@ nano .env
 | `POSTGRES_PASSWORD` | 数据库密码 |
 | `UDP_RELAY_PORT` | UDP 音频中继端口 |
 | `CONNECTION_SERVER_PORT` | SonoBus 连接服务器端口 |
+| `WEB_BRIDGE_GROUP` | Web-SonoBus bridge 默认加入的 SonoBus group |
+| `WEB_BRIDGE_USERNAME` | Web-SonoBus bridge 在 group 里的用户名 |
+| `WEB_BRIDGE_GROUP_PASSWORD` | Web-SonoBus bridge 使用的 group 密码，可留空 |
 
 ### 没有域名，只用公网 IP
 
@@ -377,6 +447,20 @@ https://<你的域名>/admin
 ```
 
 只有域名解析正确，并且证书申请成功后，才使用 `https://`。
+
+浏览器用户不安装客户端或插件时，可以打开 Web 加入页：
+
+```text
+http://<你的服务器IP>/web
+```
+
+有域名和 HTTPS 时：
+
+```text
+https://<你的域名>/web
+```
+
+`/join` 也是同一个入口。Web 加入页使用 WebSocket LPCM 通道；配置了 `web-bridge` 后，房间名等于 `WEB_BRIDGE_GROUP` 的浏览器用户会桥接到同一个 SonoBus 原生 group。Web 页面可选择 48kHz 下的 16bit/24bit、单声道/双声道发送质量，可自定义 256-4096 samples 发送延迟，加入房间后即可收听远端音频，也可以自定义接收缓冲 ms、查看估算延迟，并在成员列表里本地静音某个远端用户。页面内置麦克风权限说明、权限测试和复制入口/Chrome/Edge 临时允许命令；浏览器不允许网页替用户一键开启麦克风权限，最终仍需用户手动授权。
 
 页面字段：
 

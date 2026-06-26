@@ -10,6 +10,8 @@ on:
       - ".github/workflows/build-linux-server.yml"
       - "deploy/**"
       - "docs/**"
+      - "tools/web-bridge/**"
+      - "tools/connection-server/**"
       - "packages/**"
       - "package.json"
       - "package-lock.json"
@@ -44,6 +46,7 @@ jobs:
           cp -pR packages artifacts/lossless-audio-server/
           mkdir -p artifacts/lossless-audio-server/tools artifacts/lossless-audio-server/sonobus/deps
           cp -pR tools/connection-server artifacts/lossless-audio-server/tools/
+          cp -pR tools/web-bridge artifacts/lossless-audio-server/tools/
           cp -pR sonobus/deps/aoo artifacts/lossless-audio-server/sonobus/deps/
           cp -p package.json package-lock.json tsconfig.base.json README.md LICENSE LICENSE_EXCEPTION NOTICE.md artifacts/lossless-audio-server/
           cp -p sonobus/LICENSE artifacts/lossless-audio-server/sonobus-LICENSE

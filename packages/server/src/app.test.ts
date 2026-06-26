@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { once } from "node:events";
 import dgram from "node:dgram";
+import http from "node:http";
 import WebSocket from "ws";
-import { decodeRelayPacket, encodeAudioFrame, encodeRelayPacket } from "@lossless-audio/protocol";
+import { decodeAudioFrame, decodeRelayPacket, encodeAudioFrame, encodeRelayPacket } from "@lossless-audio/protocol";
 import { createApp } from "./app.js";
 import type { ConnectionServerAdmin } from "./connectionServerAdmin.js";
 import { MemoryStore } from "./store.js";
@@ -113,6 +114,539 @@ test("admin web page is served for browser-based remote administration", async (
     assert.match(html, /末包 /);
   } finally {
     await app.close();
+  }
+});
+
+test("web join page is served for browser users without installing a client", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/web`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    const html = await response.text();
+    assert.match(html, /Web 加入音频房间/);
+    assert.match(html, /\/web\/join/);
+    assert.match(html, /加入并开麦/);
+    assert.match(html, /WebSocket LPCM/);
+    assert.match(html, /AudioContext/);
+    assert.match(html, /麦克风权限/);
+    assert.match(html, /测试麦克风权限/);
+    assert.match(html, /复制当前入口/);
+    assert.match(html, /复制 HTTPS 入口/);
+    assert.match(html, /复制 Chrome\/Edge 临时允许命令/);
+    assert.match(html, /unsafely-treat-insecure-origin-as-secure/);
+    assert.match(html, /window\.isSecureContext/);
+    assert.match(html, /24bit，双声道/);
+    assert.match(html, /48kHz \/ 16bit \/ 双声道/);
+    assert.match(html, /48kHz \/ 24bit \/ 单声道/);
+    assert.match(html, /接收缓冲 ms/);
+    assert.match(html, /发送延迟/);
+    assert.match(html, /极低 256 samples/);
+    assert.match(html, /标准 512 samples/);
+    assert.match(html, /高稳定 2048 samples/);
+    assert.match(html, /最稳 4096 samples/);
+    assert.doesNotMatch(html, /128 samples/);
+    assert.doesNotMatch(html, /开启收听/);
+    assert.match(html, /latencyStats/);
+    assert.match(html, /静音丢弃/);
+    assert.match(html, /data-mute-user-id/);
+    assert.match(html, /data-user-id/);
+    assert.match(html, /pointerup/);
+    assert.match(html, /toggleMuteFromButton/);
+    assert.match(html, /静音/);
+    assert.match(html, /已加入，未开麦/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("anonymous browser users can join a named web room and exchange LPCM frames", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const aliceJoin = await postJson<{
+      token: string;
+      user: { id: string; username: string };
+      room: { id: string; name: string };
+      streamUrl: string;
+      transport: string;
+      bridge: { sonobusNativeInterop: boolean; status: unknown };
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "alice-web" });
+    const bobJoin = await postJson<{
+      token: string;
+      user: { id: string; username: string };
+      room: { id: string; name: string };
+      streamUrl: string;
+      transport: string;
+      bridge: { sonobusNativeInterop: boolean };
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "bob-web" });
+
+    assert.equal(aliceJoin.room.id, bobJoin.room.id);
+    assert.equal(aliceJoin.room.name, "web-band");
+    assert.equal(aliceJoin.transport, "websocket-lpcm");
+    assert.equal(aliceJoin.bridge.sonobusNativeInterop, false);
+    assert.deepEqual(aliceJoin.bridge.status, { configured: false });
+    assert.match(aliceJoin.user.id, /^web-/);
+    assert.match(bobJoin.user.id, /^web-/);
+
+    const alice = new WebSocket(`${baseUrl.replace("http", "ws")}${aliceJoin.streamUrl}?token=${aliceJoin.token}`);
+    const bob = new WebSocket(`${baseUrl.replace("http", "ws")}${bobJoin.streamUrl}?token=${bobJoin.token}`);
+    await Promise.all([once(alice, "open"), once(bob, "open")]);
+
+    const expected = encodeAudioFrame(
+      {
+        streamId: "alice-web-stream",
+        userId: aliceJoin.user.id,
+        sampleRate: 48000,
+        bitDepth: 24,
+        channels: 2,
+        sequence: 1,
+        timestamp: Date.now()
+      },
+      Buffer.from([1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0])
+    );
+    const received = onceBinaryMessage(bob);
+    alice.send(expected, { binary: true });
+    assert.deepEqual(await received, expected);
+
+    alice.close();
+    bob.close();
+  } finally {
+    await app.close();
+  }
+});
+
+test("late browser joiners receive existing web member audio formats", async () => {
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const aliceJoin = await postJson<{
+      token: string;
+      user: { id: string; username: string };
+      room: { id: string; name: string };
+      streamUrl: string;
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "alice-web" });
+    const bobJoin = await postJson<{ token: string; streamUrl: string }>(baseUrl, "/web/join", { roomName: "web-band", username: "bob-web" });
+    const alice = new WebSocket(`${baseUrl.replace("http", "ws")}${aliceJoin.streamUrl}?token=${aliceJoin.token}`);
+    const bob = new WebSocket(`${baseUrl.replace("http", "ws")}${bobJoin.streamUrl}?token=${bobJoin.token}`);
+    await Promise.all([once(alice, "open"), once(bob, "open")]);
+
+    alice.send(JSON.stringify({
+      type: "stream_format",
+      streamId: "alice-web-stream",
+      format: { sampleRate: 48000, bitDepth: 24, channels: 2 }
+    }));
+    const payload = Buffer.from([1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
+    alice.send(encodeAudioFrame(
+      {
+        streamId: "alice-web-stream",
+        userId: aliceJoin.user.id,
+        sampleRate: 48000,
+        bitDepth: 24,
+        channels: 2,
+        sequence: 1,
+        timestamp: Date.now()
+      },
+      payload
+    ), { binary: true });
+    await onceBinaryMessage(bob);
+
+    const carolJoin = await postJson<{
+      members: Array<{ userId: string; username: string; streamId?: string; format?: { sampleRate: number; bitDepth: number; channels: number } }>;
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "carol-web" });
+    const aliceMember = carolJoin.members.find((member) => member.userId === aliceJoin.user.id);
+    assert.equal(aliceMember?.streamId, "alice-web-stream");
+    assert.deepEqual(aliceMember?.format, { sampleRate: 48000, bitDepth: 24, channels: 2 });
+
+    alice.close();
+    bob.close();
+  } finally {
+    await app.close();
+  }
+});
+
+test("web join response includes SonoBus bridge service status when configured", async () => {
+  const bridgeServer = http.createServer((req, res) => {
+    if (req.url === "/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, connected: true, joined: true, group: "web", peersSeen: 2 }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => bridgeServer.listen(0, "127.0.0.1", resolve));
+  const bridgeAddress = bridgeServer.address();
+  assert(bridgeAddress && typeof bridgeAddress === "object");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    webBridgeAdminUrl: `http://127.0.0.1:${bridgeAddress.port}`
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const response = await postJson<{
+      bridge: {
+        sonobusNativeInterop: boolean;
+        status: { configured: boolean; reachable: boolean; connected: boolean; joined: boolean; group: string; peersSeen: number };
+      };
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "alice-web" });
+    assert.equal(response.bridge.sonobusNativeInterop, true);
+    assert.deepEqual(response.bridge.status, {
+      configured: true,
+      reachable: true,
+      ok: true,
+      connected: true,
+      joined: true,
+      group: "web",
+      peersSeen: 2
+    });
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => bridgeServer.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("browser LPCM frames are forwarded to the configured SonoBus web bridge", async () => {
+  const receivedBodies: Buffer[] = [];
+  const receivedHeaders: http.IncomingHttpHeaders[] = [];
+  const bridgeServer = http.createServer((req, res) => {
+    if (req.url === "/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, connected: true, joined: true, group: "web-band", peersSeen: 1 }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/audio/pcm") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ frames: [] }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/audio/pcm") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      req.on("end", () => {
+        receivedHeaders.push(req.headers);
+        receivedBodies.push(Buffer.concat(chunks));
+        res.writeHead(204);
+        res.end();
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => bridgeServer.listen(0, "127.0.0.1", resolve));
+  const bridgeAddress = bridgeServer.address();
+  assert(bridgeAddress && typeof bridgeAddress === "object");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    webBridgeAdminUrl: `http://127.0.0.1:${bridgeAddress.port}`
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const join = await postJson<{
+      token: string;
+      user: { id: string; username: string };
+      room: { id: string; name: string };
+      streamUrl: string;
+    }>(baseUrl, "/web/join", { roomName: "web-band", username: "alice-web" });
+    const alice = new WebSocket(`${baseUrl.replace("http", "ws")}${join.streamUrl}?token=${join.token}`);
+    await once(alice, "open");
+
+    const payload = Buffer.from([1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
+    const frame = encodeAudioFrame(
+      {
+        streamId: "alice-web-stream",
+        userId: join.user.id,
+        sampleRate: 48000,
+        bitDepth: 24,
+        channels: 2,
+        sequence: 7,
+        timestamp: Date.now()
+      },
+      payload
+    );
+    alice.send(frame, { binary: true });
+
+    await eventually(() => assert.equal(receivedBodies.length, 1));
+    assert.deepEqual(receivedBodies[0], payload);
+    assert.equal(receivedHeaders[0]["x-room-id"], join.room.id);
+    assert.equal(receivedHeaders[0]["x-user-id"], join.user.id);
+    assert.equal(receivedHeaders[0]["x-username"], "alice-web");
+    assert.equal(receivedHeaders[0]["x-sample-rate"], "48000");
+    assert.equal(receivedHeaders[0]["x-bit-depth"], "24");
+    assert.equal(receivedHeaders[0]["x-channels"], "2");
+    alice.close();
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => bridgeServer.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("browser LPCM frames from non-bridge web rooms are not forwarded to the SonoBus bridge", async () => {
+  let postCount = 0;
+  const bridgeServer = http.createServer((req, res) => {
+    if (req.url === "/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, connected: true, joined: true, group: "web-band", peersSeen: 1 }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/audio/pcm") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ frames: [] }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/audio/pcm") {
+      postCount += 1;
+      req.resume();
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => bridgeServer.listen(0, "127.0.0.1", resolve));
+  const bridgeAddress = bridgeServer.address();
+  assert(bridgeAddress && typeof bridgeAddress === "object");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    webBridgeAdminUrl: `http://127.0.0.1:${bridgeAddress.port}`
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const join = await postJson<{
+      token: string;
+      user: { id: string; username: string };
+      streamUrl: string;
+    }>(baseUrl, "/web/join", { roomName: "other-room", username: "alice-web" });
+    const alice = new WebSocket(`${baseUrl.replace("http", "ws")}${join.streamUrl}?token=${join.token}`);
+    await once(alice, "open");
+
+    const payload = Buffer.from([1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
+    const frame = encodeAudioFrame(
+      {
+        streamId: "alice-web-stream",
+        userId: join.user.id,
+        sampleRate: 48000,
+        bitDepth: 24,
+        channels: 2,
+        sequence: 7,
+        timestamp: Date.now()
+      },
+      payload
+    );
+    alice.send(frame, { binary: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(postCount, 0);
+    alice.close();
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => bridgeServer.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("native bridge PCM frames are broadcast into the matching web room", async () => {
+  let frameDelivered = false;
+  const nativePayload = Buffer.from([9, 0, 0, 8, 0, 0, 7, 0, 0, 6, 0, 0]);
+  const bridgeServer = http.createServer((req, res) => {
+    if (req.url === "/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, connected: true, joined: true, group: "web-band", peersSeen: 1 }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/audio/pcm") {
+      req.resume();
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/audio/pcm") {
+      const frames = frameDelivered
+        ? []
+        : [{
+            group: "web-band",
+            userId: "sonobus-native-peer",
+            username: "native-peer",
+            streamId: "native-peer-stream",
+            sampleRate: 48000,
+            bitDepth: 24,
+            channels: 2,
+            sequence: 3,
+            timestamp: Date.now(),
+            payload: nativePayload.toString("base64")
+          }];
+      frameDelivered = true;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ frames }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => bridgeServer.listen(0, "127.0.0.1", resolve));
+  const bridgeAddress = bridgeServer.address();
+  assert(bridgeAddress && typeof bridgeAddress === "object");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    webBridgeAdminUrl: `http://127.0.0.1:${bridgeAddress.port}`
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const join = await postJson<{ token: string; streamUrl: string }>(baseUrl, "/web/join", { roomName: "web-band", username: "alice-web" });
+    const alice = new WebSocket(`${baseUrl.replace("http", "ws")}${join.streamUrl}?token=${join.token}`);
+    await once(alice, "open");
+
+    const received = decodeAudioFrame(await onceBinaryMessage(alice));
+    assert.equal(received.header.userId, "sonobus-native-peer");
+    assert.equal(received.header.streamId, "native-peer-stream");
+    assert.equal(received.header.sampleRate, 48000);
+    assert.equal(received.header.bitDepth, 24);
+    assert.equal(received.header.channels, 2);
+    assert.deepEqual(received.payload, nativePayload);
+    alice.close();
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => bridgeServer.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("native bridge peers are shown only in the matching web bridge room", async () => {
+  const bridgeServer = http.createServer((req, res) => {
+    if (req.url === "/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        ok: true,
+        connected: true,
+        joined: true,
+        group: "web-band",
+        peersSeen: 1,
+        peers: [
+          { group: "web-band", user: "native-peer", connected: true, sourceInvited: true }
+        ]
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/audio/pcm") {
+      req.resume();
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && req.url === "/audio/pcm") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ frames: [] }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => bridgeServer.listen(0, "127.0.0.1", resolve));
+  const bridgeAddress = bridgeServer.address();
+  assert(bridgeAddress && typeof bridgeAddress === "object");
+
+  const app = await createApp({
+    jwtSecret: "test-secret",
+    adminUsername: "admin",
+    adminPassword: "admin-pass",
+    maxBytesPerSecondPerClient: 1024 * 1024,
+    webBridgeAdminUrl: `http://127.0.0.1:${bridgeAddress.port}`
+  });
+
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    let bridgedJoin: { members: Array<{ userId: string; username: string }> } | undefined;
+    await eventually(async () => {
+      bridgedJoin = await postJson<{ members: Array<{ userId: string; username: string }> }>(
+        baseUrl,
+        "/web/join",
+        { roomName: "web-band", username: "alice-web" }
+      );
+      assert.ok(bridgedJoin.members.some((member) => member.userId === "sonobus-native-peer"));
+    });
+    const otherJoin = await postJson<{ members: Array<{ userId: string; username: string }> }>(
+      baseUrl,
+      "/web/join",
+      { roomName: "other-room", username: "bob-web" }
+    );
+    const nativeMember = bridgedJoin?.members.find((member) => member.userId === "sonobus-native-peer");
+    assert.equal(nativeMember?.userId, "sonobus-native-peer");
+    assert.equal(nativeMember?.username, "native-peer");
+    assert.equal(otherJoin.members.some((member) => member.userId === "sonobus-native-peer"), false);
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => bridgeServer.close((error) => (error ? reject(error) : resolve())));
   }
 });
 
@@ -1220,6 +1754,35 @@ async function post<T = unknown>(baseUrl: string, path: string, token: string, b
   });
   assert.ok(response.status >= 200 && response.status < 300, `${path} failed with ${response.status}`);
   return (await response.json()) as T;
+}
+
+async function postJson<T = unknown>(baseUrl: string, path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  assert.ok(response.status >= 200 && response.status < 300, `${path} failed with ${response.status}`);
+  return (await response.json()) as T;
+}
+
+async function eventually(assertion: () => void | Promise<void>, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
 }
 
 async function onceBinaryMessage(ws: WebSocket): Promise<Buffer> {

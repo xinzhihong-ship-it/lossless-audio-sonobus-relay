@@ -7,7 +7,8 @@ const config: ServerConfig = {
   databaseUrl: process.env.DATABASE_URL,
   maxBytesPerSecondPerClient: Number(process.env.MAX_BYTES_PER_SECOND_PER_CLIENT ?? 50 * 1024 * 1024),
   udpRelayPort: Number(process.env.UDP_RELAY_PORT ?? 9000),
-  connectionServerAdminUrl: process.env.CONNECTION_SERVER_ADMIN_URL
+  connectionServerAdminUrl: process.env.CONNECTION_SERVER_ADMIN_URL,
+  webBridgeAdminUrl: process.env.WEB_BRIDGE_ADMIN_URL
 };
 
 const port = Number(process.env.PORT ?? 8080);

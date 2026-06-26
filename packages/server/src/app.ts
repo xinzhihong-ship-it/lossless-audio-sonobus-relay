@@ -1,6 +1,8 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
 import { WebSocketServer } from "ws";
+import { encodeAudioFrame, type AudioFrameHeader } from "@lossless-audio/protocol";
 import { signToken, verifyPassword, verifyToken, type TokenClaims } from "./auth.js";
 import { HttpConnectionServerAdmin, type ConnectionServerAdmin, type ConnectionServerConnection } from "./connectionServerAdmin.js";
 import { RoomHub, type WebSocketConnection } from "./roomHub.js";
@@ -16,6 +18,7 @@ export type ServerConfig = {
   udpRelayPort?: number;
   udpRawPeerTtlMs?: number;
   connectionServerAdminUrl?: string;
+  webBridgeAdminUrl?: string;
   connectionServer?: ConnectionServerAdmin;
   store?: Store;
 };
@@ -24,6 +27,11 @@ export type App = {
   server: http.Server;
   store: Store;
   close(): Promise<void>;
+};
+
+type BridgeGroupCache = {
+  group?: string;
+  expiresAt: number;
 };
 
 type AdminConnection = WebSocketConnection | UdpRelayConnection | ConnectionServerConnection;
@@ -47,10 +55,18 @@ export async function createApp(config: ServerConfig): Promise<App> {
   const store = config.store ?? (config.databaseUrl ? new PostgresStore(config.databaseUrl) : new MemoryStore());
   await store.init();
   await ensureAdmin(store, config.adminUsername, config.adminPassword);
+  const webBridgeAdminUrl = config.webBridgeAdminUrl;
+  const bridgeGroupCache: BridgeGroupCache = { expiresAt: 0 };
 
-  const hub = new RoomHub({ maxBytesPerSecondPerClient: config.maxBytesPerSecondPerClient });
+  const hub = new RoomHub({
+    maxBytesPerSecondPerClient: config.maxBytesPerSecondPerClient,
+    audioFrameSink: webBridgeAdminUrl
+      ? (frame, sender) => postWebBridgeAudioFrame(webBridgeAdminUrl, store, bridgeGroupCache, frame, sender)
+      : undefined
+  });
   const udpRelay = config.udpRelayPort === undefined ? undefined : new UdpRelay(config.udpRelayPort, config.udpRawPeerTtlMs);
   const connectionServer = config.connectionServer ?? (config.connectionServerAdminUrl ? new HttpConnectionServerAdmin(config.connectionServerAdminUrl) : undefined);
+  const bridgePoller = webBridgeAdminUrl ? startWebBridgeAudioPoller(webBridgeAdminUrl, store, hub) : undefined;
   await udpRelay?.start();
   await restorePersistentBans(store, udpRelay, connectionServer);
   const server = http.createServer((req, res) => {
@@ -90,6 +106,7 @@ export async function createApp(config: ServerConfig): Promise<App> {
     store,
     async close() {
       wss.close();
+      bridgePoller?.stop();
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
       await udpRelay?.stop();
       await store.close();
@@ -118,6 +135,11 @@ async function handleHttp(
     return;
   }
 
+  if (req.method === "GET" && (url.pathname === "/web" || url.pathname === "/web/" || url.pathname === "/join" || url.pathname === "/join/")) {
+    sendHtml(res, 200, webJoinPageHtml);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/auth/login") {
     const body = await readJson<{ username?: string; password?: string }>(req);
     if (!body.username || !body.password) {
@@ -134,6 +156,41 @@ async function handleHttp(
     sendJson(res, 200, {
       token: signToken({ sub: user.id, username: user.username, role: user.role }, config.jwtSecret),
       user: { id: user.id, username: user.username, role: user.role }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/web/join") {
+    const body = await readJson<{ roomName?: string; username?: string }>(req);
+    const roomName = cleanWebField(body.roomName, 80);
+    const username = cleanWebField(body.username, 48);
+    if (!roomName || !username) {
+      sendJson(res, 400, { error: "roomName and username are required." });
+      return;
+    }
+
+    const adminUser = await store.getUserByUsername(config.adminUsername);
+    if (!adminUser) {
+      sendJson(res, 500, { error: "Admin user is not initialized." });
+      return;
+    }
+
+    const room = await findOrCreateRoomByName(store, roomName, adminUser.id);
+    const bridgeStatus = await getWebBridgeStatus(config.webBridgeAdminUrl);
+    const userId = `web-${randomUUID()}`;
+    const token = signToken({ sub: userId, username, role: "user" }, config.jwtSecret, 60 * 60 * 6);
+    sendJson(res, 200, {
+      token,
+      user: { id: userId, username, role: "user" },
+      room,
+      members: hub.members(room.id),
+      streamUrl: `/rooms/${room.id}/stream`,
+      transport: "websocket-lpcm",
+      bridge: {
+        sonobusNativeInterop: webBridgeInteropEnabled(bridgeStatus),
+        status: bridgeStatus,
+        note: "Browser LPCM is bridged to the configured SonoBus/AoO group when the web-bridge service is reachable and joined."
+      }
     });
     return;
   }
@@ -362,6 +419,226 @@ async function ensureAdmin(store: Store, username: string, password: string): Pr
   }
 }
 
+async function findOrCreateRoomByName(store: Store, name: string, createdBy: string) {
+  const existing = (await store.listRooms()).find((room) => room.name === name);
+  return existing ?? store.createRoom(name, createdBy);
+}
+
+function cleanWebField(value: string | undefined, maxLength: number): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").slice(0, maxLength);
+}
+
+async function getWebBridgeStatus(adminUrl: string | undefined): Promise<unknown> {
+  if (!adminUrl) {
+    return { configured: false };
+  }
+  try {
+    const response = await fetch(`${adminUrl.replace(/\/$/, "")}/status`);
+    if (!response.ok) {
+      return { configured: true, reachable: false, status: response.status };
+    }
+    return { configured: true, reachable: true, ...(await response.json()) as Record<string, unknown> };
+  } catch (error) {
+    return {
+      configured: true,
+      reachable: false,
+      error: error instanceof Error ? error.message : "unknown bridge status error"
+    };
+  }
+}
+
+function webBridgeInteropEnabled(status: unknown): boolean {
+  return Boolean(
+    status &&
+    typeof status === "object" &&
+    "configured" in status &&
+    "reachable" in status &&
+    "connected" in status &&
+    "joined" in status &&
+    (status as { configured?: unknown }).configured === true &&
+    (status as { reachable?: unknown }).reachable === true &&
+    (status as { connected?: unknown }).connected === true &&
+    (status as { joined?: unknown }).joined === true
+  );
+}
+
+async function postWebBridgeAudioFrame(
+  adminUrl: string,
+  store: Store,
+  bridgeGroupCache: BridgeGroupCache,
+  frame: { header: { sampleRate: number; bitDepth: number; channels: number; sequence: number; timestamp: number; userId: string; streamId: string }; payload: Buffer },
+  sender: WebSocketConnection
+): Promise<void> {
+  try {
+    const [room, bridgeGroup] = await Promise.all([
+      store.getRoom(sender.roomId),
+      getCachedWebBridgeGroup(adminUrl, bridgeGroupCache)
+    ]);
+    if (!room || bridgeGroup !== room.name) {
+      return;
+    }
+    await fetch(`${adminUrl.replace(/\/$/, "")}/audio/pcm`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-room-id": sender.roomId,
+        "x-user-id": sender.userId,
+        "x-username": sender.username,
+        "x-stream-id": frame.header.streamId,
+        "x-sample-rate": String(frame.header.sampleRate),
+        "x-bit-depth": String(frame.header.bitDepth),
+        "x-channels": String(frame.header.channels),
+        "x-sequence": String(frame.header.sequence),
+        "x-timestamp": String(frame.header.timestamp)
+      },
+      body: frame.payload as unknown as BodyInit
+    });
+  } catch {
+    // Browser rooms must keep working even when the optional native bridge is down.
+  }
+}
+
+async function getCachedWebBridgeGroup(adminUrl: string, cache: BridgeGroupCache): Promise<string | undefined> {
+  const now = Date.now();
+  if (now < cache.expiresAt) {
+    return cache.group;
+  }
+  const status = await getWebBridgeStatus(adminUrl) as WebBridgeStatus;
+  cache.group = status.connected === true && status.joined === true && typeof status.group === "string" ? status.group : undefined;
+  cache.expiresAt = now + 500;
+  return cache.group;
+}
+
+type BridgeAudioPollFrame = {
+  group?: string;
+  userId?: string;
+  username?: string;
+  streamId?: string;
+  sampleRate?: number;
+  bitDepth?: 16 | 24 | 32;
+  channels?: 1 | 2;
+  sequence?: number;
+  timestamp?: number;
+  payload?: string;
+};
+
+type BridgePeerStatus = {
+  group?: string;
+  user?: string;
+  connected?: boolean;
+  sourceInvited?: boolean;
+  nativeFramesOut?: number;
+  sinkPackets?: number;
+};
+
+type WebBridgeStatus = {
+  configured?: boolean;
+  reachable?: boolean;
+  connected?: boolean;
+  joined?: boolean;
+  group?: string;
+  peers?: BridgePeerStatus[];
+};
+
+function startWebBridgeAudioPoller(adminUrl: string, store: Store, hub: RoomHub): { stop(): void } {
+  let stopped = false;
+  const baseUrl = adminUrl.replace(/\/$/, "");
+  let lastStatusPoll = 0;
+  const poll = async () => {
+    if (stopped) {
+      return;
+    }
+    try {
+      const response = await fetch(`${baseUrl}/audio/pcm`);
+      if (response.ok) {
+        const body = (await response.json()) as { frames?: BridgeAudioPollFrame[] };
+        for (const frame of body.frames ?? []) {
+          await broadcastBridgeAudioFrame(store, hub, frame);
+        }
+      }
+      const now = Date.now();
+      if (now - lastStatusPoll >= 500) {
+        lastStatusPoll = now;
+        const statusResponse = await fetch(`${baseUrl}/status`);
+        if (statusResponse.ok) {
+          await publishBridgePeerStatus(store, hub, (await statusResponse.json()) as { group?: string; peers?: BridgePeerStatus[] });
+        }
+      }
+    } catch {
+      // Optional bridge polling should not affect the HTTP/WebSocket service.
+    } finally {
+      if (!stopped) {
+        setTimeout(poll, 5);
+      }
+    }
+  };
+  setTimeout(poll, 5);
+  return {
+    stop() {
+      stopped = true;
+    }
+  };
+}
+
+async function publishBridgePeerStatus(store: Store, hub: RoomHub, status: { group?: string; peers?: BridgePeerStatus[] }): Promise<void> {
+  const group = status.group;
+  if (!group) {
+    return;
+  }
+  const room = (await store.listRooms()).find((candidate) => candidate.name === group);
+  if (!room) {
+    return;
+  }
+  const members = (status.peers ?? [])
+    .filter((peer) => peer.group === group && peer.user && peer.connected !== false)
+    .map((peer) => ({
+      userId: `sonobus-${peer.user ?? "unknown"}`,
+      username: peer.user ?? "SonoBus",
+      streamId: `sonobus-${peer.user ?? "unknown"}-native`,
+      format: {
+        sampleRate: 48000,
+        bitDepth: 24 as const,
+        channels: 2 as const
+      }
+    }));
+  hub.publishBridgeMembers(room.id, members);
+}
+
+async function broadcastBridgeAudioFrame(store: Store, hub: RoomHub, frame: BridgeAudioPollFrame): Promise<void> {
+  if (!frame.group || !frame.userId || !frame.streamId || !frame.payload) {
+    return;
+  }
+  const room = (await store.listRooms()).find((candidate) => candidate.name === frame.group);
+  if (!room) {
+    return;
+  }
+  const header: AudioFrameHeader = {
+    streamId: frame.streamId,
+    userId: frame.userId,
+    sampleRate: frame.sampleRate ?? 48000,
+    bitDepth: frame.bitDepth ?? 24,
+    channels: frame.channels ?? 2,
+    sequence: frame.sequence ?? 0,
+    timestamp: frame.timestamp ?? Date.now()
+  };
+  const payload = Buffer.from(frame.payload, "base64");
+  const raw = encodeAudioFrame(header, payload);
+  hub.broadcastBridgeAudioFrame(
+    room.id,
+    {
+      userId: frame.userId,
+      username: frame.username ?? frame.userId,
+      streamId: frame.streamId,
+      format: {
+        sampleRate: header.sampleRate,
+        bitDepth: header.bitDepth,
+        channels: header.channels
+      }
+    },
+    raw
+  );
+}
+
 function authenticate(req: IncomingMessage, config: ServerConfig): TokenClaims | undefined {
   const auth = req.headers.authorization ?? "";
   const match = auth.match(/^Bearer (.+)$/);
@@ -568,6 +845,1021 @@ function sendHtml(res: ServerResponse, status: number, html: string): void {
   });
   res.end(payload);
 }
+
+const webJoinPageHtml = String.raw`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web 加入音频房间</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #101418;
+      color: #eef3f7;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #101418;
+    }
+    main {
+      width: min(1040px, 100%);
+      margin: 0 auto;
+      padding: 22px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 6px 0 0;
+      color: #aab7c3;
+      line-height: 1.5;
+    }
+    .badge {
+      min-height: 28px;
+      padding: 5px 10px;
+      border: 1px solid #365043;
+      border-radius: 999px;
+      color: #bfe8ce;
+      background: #142018;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 14px;
+    }
+    section {
+      border: 1px solid #2a3540;
+      border-radius: 8px;
+      background: #171f27;
+      padding: 16px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+      color: #aab7c3;
+      font-size: 13px;
+    }
+    input,
+    select,
+    button {
+      min-height: 38px;
+      border: 1px solid #3a4a59;
+      border-radius: 6px;
+      background: #0f1419;
+      color: #eef3f7;
+      padding: 0 10px;
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      border-color: #2b7b68;
+      background: #1b6958;
+      font-weight: 700;
+    }
+    button.secondary {
+      border-color: #425467;
+      background: #263341;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .row > button,
+    .row > select {
+      flex: 1 1 150px;
+    }
+    .meter {
+      width: 100%;
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #0f1419;
+      border: 1px solid #2a3540;
+    }
+    .meter > div {
+      width: 0%;
+      height: 100%;
+      background: #d6a23c;
+      transition: width 80ms linear;
+    }
+    .status {
+      min-height: 22px;
+      color: #bfe8ce;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .error {
+      color: #ffb0a8;
+    }
+    .latency {
+      min-height: 22px;
+      margin-top: 10px;
+      color: #aab7c3;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .permission-panel {
+      display: grid;
+      gap: 10px;
+      grid-column: 1 / -1;
+    }
+    .permission-panel .status {
+      margin: 0;
+    }
+    .permission-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .permission-item {
+      min-height: 120px;
+      padding: 10px;
+      border: 1px solid #2a3540;
+      border-radius: 8px;
+      background: #111820;
+    }
+    .permission-item strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .permission-item small {
+      color: #aab7c3;
+      line-height: 1.5;
+    }
+    .members {
+      display: grid;
+      gap: 8px;
+    }
+    .member {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) auto auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 46px;
+      padding: 10px;
+      border: 1px solid #2a3540;
+      border-radius: 8px;
+      background: #111820;
+    }
+    .member small {
+      display: block;
+      margin-top: 3px;
+      color: #aab7c3;
+    }
+    .member button {
+      min-height: 32px;
+      padding: 0 10px;
+      border-color: #425467;
+      background: #263341;
+      font-size: 12px;
+    }
+    .member button.active {
+      border-color: #8d5b2d;
+      background: #6b421d;
+      color: #ffd7a5;
+    }
+    .empty {
+      color: #aab7c3;
+    }
+    @media (max-width: 860px) {
+      header,
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      main {
+        padding: 14px;
+      }
+      .permission-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Web 加入音频房间</h1>
+        <p>浏览器直接采集麦克风，通过服务器 WebSocket 转发无压缩 PCM；bridge 在线时会转接到同名 SonoBus group。</p>
+      </div>
+      <div class="badge" id="transportBadge">WebSocket LPCM</div>
+    </header>
+
+    <div class="grid">
+      <section>
+        <h2>加入</h2>
+        <label>房间名
+          <input id="roomName" maxlength="80" value="studio" autocomplete="off">
+        </label>
+        <label>显示名
+          <input id="username" maxlength="48" value="web-user" autocomplete="off">
+        </label>
+        <label>输入设备
+          <select id="inputDevice"></select>
+        </label>
+        <label>音质
+          <select id="qualitySelect">
+            <option value="48000-24-2" selected>48kHz / 24bit / 双声道</option>
+            <option value="48000-16-2">48kHz / 16bit / 双声道</option>
+            <option value="48000-24-1">48kHz / 24bit / 单声道</option>
+            <option value="48000-16-1">48kHz / 16bit / 单声道</option>
+          </select>
+        </label>
+        <label>接收缓冲 ms
+          <input id="playbackBufferMs" type="number" min="5" max="200" step="5" value="25">
+        </label>
+        <label>发送延迟
+          <select id="sendLatencySelect">
+            <option value="256">极低 256 samples</option>
+            <option value="512" selected>标准 512 samples</option>
+            <option value="1024">稳定 1024 samples</option>
+            <option value="2048">高稳定 2048 samples</option>
+            <option value="4096">最稳 4096 samples</option>
+          </select>
+        </label>
+        <div class="row">
+          <button id="refreshDevices" class="secondary" type="button">刷新设备</button>
+          <button id="joinButton" type="button">加入并开麦</button>
+        </div>
+        <p class="status" id="status">未连接</p>
+      </section>
+
+      <section>
+        <h2>发送</h2>
+        <div class="meter" aria-label="input level"><div id="inputMeter"></div></div>
+        <p id="qualitySummary">采样率 48000Hz，24bit，双声道，发送 512 samples。浏览器需要允许麦克风权限。</p>
+        <div class="row">
+          <button id="startButton" type="button" disabled>开始发送</button>
+          <button id="stopButton" class="secondary" type="button" disabled>停止发送</button>
+        </div>
+        <div class="latency" id="latencyStats">未收到远端音频。</div>
+      </section>
+
+      <section class="permission-panel">
+        <h2>麦克风权限</h2>
+        <p class="status" id="permissionStatus">正在检查当前浏览器权限环境。</p>
+        <div class="row">
+          <button id="testMicButton" class="secondary" type="button">测试麦克风权限</button>
+          <button id="copyWebUrlButton" class="secondary" type="button">复制当前入口</button>
+          <button id="copyHttpsUrlButton" class="secondary" type="button">复制 HTTPS 入口</button>
+          <button id="copyChromeFlagButton" class="secondary" type="button">复制 Chrome/Edge 临时允许命令</button>
+        </div>
+        <div class="permission-grid">
+          <div class="permission-item">
+            <strong>Chrome / Edge</strong>
+            <small>推荐 HTTPS。没有域名时，地址栏左侧站点设置里允许麦克风；若 HTTP 公网 IP 被拦，可用 Chrome/Edge 临时允许命令启动浏览器。</small>
+          </div>
+          <div class="permission-item">
+            <strong>Firefox</strong>
+            <small>推荐 HTTPS。点击地址栏左侧权限图标允许麦克风；HTTP 公网 IP 可能被浏览器策略拦截。</small>
+          </div>
+          <div class="permission-item">
+            <strong>Safari / iOS</strong>
+            <small>基本需要 HTTPS。进入 Safari 网站设置允许麦克风；公网 IP 的 HTTP 页面通常不能稳定使用采集权限。</small>
+          </div>
+          <div class="permission-item">
+            <strong>没有域名</strong>
+            <small>最稳做法是买域名并绑定 HTTPS。网页不能一键替用户开启权限，只能引导复制地址或命令后手动允许。</small>
+          </div>
+        </div>
+      </section>
+
+      <section style="grid-column: 1 / -1;">
+        <h2>房间成员</h2>
+        <div class="members" id="members"><div class="empty">加入后显示在线成员、开麦状态和远端音频格式。</div></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const defaultFormat = { sampleRate: 48000, bitDepth: 24, channels: 2 };
+    const playbackLeadSeconds = 0.025;
+    const playbackMinLeadSeconds = 0.005;
+    const frameMagic = "LPCM";
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const state = {
+      token: "",
+      user: null,
+      room: null,
+      socket: null,
+      audioContext: null,
+      stream: null,
+      source: null,
+      processor: null,
+      monitorGain: null,
+      sequence: 0,
+      streamId: "",
+      members: new Map(),
+      nextPlaybackTimeByUser: new Map(),
+      mutedUserIds: new Set(),
+      mutedKeys: new Set(),
+      playingSourcesByUser: new Map(),
+      playbackGainsByUser: new Map(),
+      latencyByUser: new Map(),
+      receivedFrames: 0,
+      playedFrames: 0,
+      mutedFrames: 0,
+      droppedFrames: 0,
+      lastMuteToggleAtByKey: new Map()
+    };
+
+    const roomNameInput = document.getElementById("roomName");
+    const usernameInput = document.getElementById("username");
+    const inputDeviceSelect = document.getElementById("inputDevice");
+    const qualitySelect = document.getElementById("qualitySelect");
+    const playbackBufferMsInput = document.getElementById("playbackBufferMs");
+    const sendLatencySelect = document.getElementById("sendLatencySelect");
+    const refreshDevicesButton = document.getElementById("refreshDevices");
+    const joinButton = document.getElementById("joinButton");
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const statusEl = document.getElementById("status");
+    const membersEl = document.getElementById("members");
+    const inputMeter = document.getElementById("inputMeter");
+    const transportBadge = document.getElementById("transportBadge");
+    const qualitySummary = document.getElementById("qualitySummary");
+    const latencyStatsEl = document.getElementById("latencyStats");
+    const permissionStatusEl = document.getElementById("permissionStatus");
+    const testMicButton = document.getElementById("testMicButton");
+    const copyWebUrlButton = document.getElementById("copyWebUrlButton");
+    const copyHttpsUrlButton = document.getElementById("copyHttpsUrlButton");
+    const copyChromeFlagButton = document.getElementById("copyChromeFlagButton");
+
+    refreshDevicesButton.addEventListener("click", refreshDevices);
+    joinButton.addEventListener("click", joinRoom);
+    startButton.addEventListener("click", startCapture);
+    stopButton.addEventListener("click", stopCapture);
+    testMicButton.addEventListener("click", testMicrophonePermission);
+    copyWebUrlButton.addEventListener("click", function () { copyText(currentWebUrl(), "已复制当前入口"); });
+    copyHttpsUrlButton.addEventListener("click", function () { copyText(httpsWebUrl(), "已复制 HTTPS 入口"); });
+    copyChromeFlagButton.addEventListener("click", function () { copyText(chromeInsecureOriginCommand(), "已复制 Chrome/Edge 临时允许命令"); });
+    membersEl.addEventListener("click", function (event) {
+      const button = findMuteButton(event.target);
+      if (!button) {
+        return;
+      }
+      toggleMuteFromButton(button);
+    });
+    qualitySelect.addEventListener("change", function () {
+      updateQualitySummary();
+      if (state.user) {
+        state.members.set(state.user.id, { userId: state.user.id, username: state.user.username, streamId: state.streamId, format: currentFormat() });
+        renderMembers();
+      }
+    });
+    sendLatencySelect.addEventListener("change", function () {
+      updateQualitySummary();
+      if (state.processor) {
+        stopCapture().catch(showError);
+        setStatus("发送延迟已切换，点击开始发送重新生效。");
+      }
+    });
+    updateQualitySummary();
+    updatePermissionStatus();
+
+    refreshDevices().catch(showError);
+
+    function updatePermissionStatus() {
+      const local = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+      const secure = window.isSecureContext || location.protocol === "https:" || local;
+      if (secure) {
+        permissionStatusEl.textContent = "当前页面属于安全上下文，浏览器应允许弹出麦克风授权。";
+        return;
+      }
+      permissionStatusEl.textContent = "当前是 HTTP 公网地址，部分浏览器会禁止麦克风。推荐绑定域名和 HTTPS，或在 Chrome/Edge 用临时允许命令测试。";
+    }
+
+    async function testMicrophonePermission() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(function (track) { track.stop(); });
+        permissionStatusEl.textContent = "麦克风权限可用。";
+        await refreshDevices();
+      } catch (error) {
+        permissionStatusEl.textContent = "麦克风权限不可用：" + (error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    function currentWebUrl() {
+      return location.origin + "/web";
+    }
+
+    function httpsWebUrl() {
+      return "https://" + location.host + "/web";
+    }
+
+    function chromeInsecureOriginCommand() {
+      const origin = location.origin;
+      return '"%ProgramFiles%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe" --unsafely-treat-insecure-origin-as-secure="' + origin + '" --user-data-dir="%TEMP%\\\\sonobus-web-mic"\\n"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe" --unsafely-treat-insecure-origin-as-secure="' + origin + '" --user-data-dir="%TEMP%\\\\sonobus-web-mic-edge"';
+    }
+
+    async function copyText(text, message) {
+      try {
+        await navigator.clipboard.writeText(text);
+        permissionStatusEl.textContent = message + "：" + text;
+      } catch {
+        permissionStatusEl.textContent = "复制失败，请手动复制：" + text;
+      }
+    }
+
+    async function refreshDevices() {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach(function (track) { track.stop(); });
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter(function (device) { return device.kind === "audioinput"; });
+      inputDeviceSelect.innerHTML = "";
+      for (const device of inputs) {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent = device.label || "音频输入 " + (inputDeviceSelect.length + 1);
+        inputDeviceSelect.appendChild(option);
+      }
+      setStatus("已刷新输入设备");
+    }
+
+    async function joinRoom() {
+      await stopCapture();
+      const context = ensureAudioContext();
+      await context.resume();
+      if (state.socket) {
+        state.socket.close();
+      }
+      const response = await fetch("/web/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          roomName: roomNameInput.value,
+          username: usernameInput.value
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "加入失败");
+      }
+      state.token = body.token;
+      state.user = body.user;
+      state.room = body.room;
+      state.members = new Map(body.members.map(function (member) { return [member.userId, member]; }));
+      state.members.set(body.user.id, { userId: body.user.id, username: body.user.username, format: currentFormat() });
+      transportBadge.textContent = body.transport || "websocket-lpcm";
+      renderMembers();
+
+      const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(scheme + "//" + location.host + body.streamUrl + "?token=" + encodeURIComponent(body.token));
+      socket.binaryType = "arraybuffer";
+      socket.onopen = function () {
+        startButton.disabled = false;
+        setStatus("已加入房间：" + body.room.name + "，正在打开麦克风");
+        startCapture().catch(function (error) {
+          showError(error);
+          startButton.disabled = false;
+          stopButton.disabled = true;
+        });
+      };
+      socket.onmessage = function (event) {
+        if (typeof event.data === "string") {
+          handleServerMessage(JSON.parse(event.data));
+        } else {
+          handleAudioFrame(event.data);
+        }
+      };
+      socket.onclose = function () {
+        startButton.disabled = true;
+        stopButton.disabled = true;
+        stopCapture().catch(function () {});
+        setStatus("连接已断开");
+      };
+      socket.onerror = function () {
+        showError(new Error("WebSocket 连接失败"));
+      };
+      state.socket = socket;
+    }
+
+    function ensureAudioContext() {
+      if (!state.audioContext) {
+        state.audioContext = new AudioContext({ sampleRate: currentFormat().sampleRate });
+      }
+      return state.audioContext;
+    }
+
+    async function startCapture() {
+      if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.user) {
+        throw new Error("请先加入房间");
+      }
+      const format = currentFormat();
+      const context = ensureAudioContext();
+      await context.resume();
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: inputDeviceSelect.value ? { exact: inputDeviceSelect.value } : undefined,
+          channelCount: format.channels,
+          sampleRate: format.sampleRate,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+      state.streamId = state.user.id + "-" + Date.now();
+      state.socket.send(JSON.stringify({ type: "stream_format", streamId: state.streamId, format: format }));
+      state.source = context.createMediaStreamSource(state.stream);
+      const blockSize = sendBlockSize();
+      state.processor = context.createScriptProcessor(blockSize, format.channels, format.channels);
+      state.monitorGain = context.createGain();
+      state.monitorGain.gain.value = 0;
+      state.processor.onaudioprocess = function (event) {
+        const left = event.inputBuffer.getChannelData(0);
+        const right = event.inputBuffer.numberOfChannels > 1 ? event.inputBuffer.getChannelData(1) : left;
+        const payload = encodePcmInterleaved(left, right, format);
+        const header = {
+          streamId: state.streamId,
+          userId: state.user.id,
+          sampleRate: format.sampleRate,
+          bitDepth: format.bitDepth,
+          channels: format.channels,
+          sequence: state.sequence++,
+          timestamp: Date.now()
+        };
+        updateInputMeter(left, right);
+        if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+          state.socket.send(encodeAudioFrame(header, payload));
+        }
+      };
+      state.source.connect(state.processor);
+      state.processor.connect(state.monitorGain);
+      state.monitorGain.connect(context.destination);
+      startButton.disabled = true;
+      stopButton.disabled = false;
+      setStatus("正在发送麦克风音频，发送延迟 " + blockSize + " samples。房间成员同步后可互相听见。");
+    }
+
+    async function stopCapture() {
+      if (state.processor) {
+        state.processor.disconnect();
+      }
+      if (state.source) {
+        state.source.disconnect();
+      }
+      if (state.monitorGain) {
+        state.monitorGain.disconnect();
+      }
+      if (state.stream) {
+        state.stream.getTracks().forEach(function (track) { track.stop(); });
+      }
+      state.processor = null;
+      state.source = null;
+      state.monitorGain = null;
+      state.stream = null;
+      inputMeter.style.width = "0%";
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        startButton.disabled = false;
+      }
+      stopButton.disabled = true;
+    }
+
+    function handleServerMessage(message) {
+      if (message.type === "room_state") {
+        state.members = new Map(message.members.map(function (member) { return [member.userId, member]; }));
+        if (state.user) {
+          state.members.set(state.user.id, { userId: state.user.id, username: state.user.username, streamId: state.streamId, format: currentFormat() });
+        }
+        renderMembers();
+      } else if (message.type === "member_joined") {
+        state.members.set(message.member.userId, message.member);
+        renderMembers();
+      } else if (message.type === "member_left") {
+        state.members.delete(message.userId);
+        renderMembers();
+      } else if (message.type === "stream_format") {
+        state.members.set(message.member.userId, message.member);
+        renderMembers();
+      } else if (message.type === "error") {
+        showError(new Error(message.message));
+      }
+    }
+
+    function handleAudioFrame(raw) {
+      const frame = decodeAudioFrame(raw);
+      if (state.user && frame.header.userId === state.user.id) {
+        return;
+      }
+      const previous = state.members.get(frame.header.userId) || { userId: frame.header.userId, username: frame.header.userId.slice(0, 8) };
+      state.members.set(frame.header.userId, {
+        userId: frame.header.userId,
+        username: previous.username || frame.header.userId.slice(0, 8),
+        streamId: frame.header.streamId,
+        format: {
+          sampleRate: frame.header.sampleRate,
+          bitDepth: frame.header.bitDepth,
+          channels: frame.header.channels
+        }
+      });
+      renderMembers();
+      state.receivedFrames += 1;
+      if (isMutedFrame(frame)) {
+        state.mutedFrames += 1;
+        updateLatency(frame.header.userId, frame.header.timestamp, 0);
+        return;
+      }
+      playPcmFrame(frame);
+    }
+
+    function encodeAudioFrame(header, payload) {
+      const headerBytes = encoder.encode(JSON.stringify(header));
+      const output = new ArrayBuffer(12 + headerBytes.byteLength + payload.byteLength);
+      const view = new DataView(output);
+      writeAscii(view, 0, frameMagic);
+      view.setUint8(4, 1);
+      view.setUint8(5, 1);
+      view.setUint16(6, headerBytes.byteLength, false);
+      view.setUint32(8, payload.byteLength, false);
+      new Uint8Array(output, 12, headerBytes.byteLength).set(headerBytes);
+      new Uint8Array(output, 12 + headerBytes.byteLength).set(payload);
+      return output;
+    }
+
+    function decodeAudioFrame(raw) {
+      const bytes = new Uint8Array(raw);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      if (readAscii(view, 0, 4) !== frameMagic || view.getUint8(4) !== 1 || view.getUint8(5) !== 1) {
+        throw new Error("远端音频帧格式不支持");
+      }
+      const headerLength = view.getUint16(6, false);
+      const payloadLength = view.getUint32(8, false);
+      const headerStart = 12;
+      const payloadStart = headerStart + headerLength;
+      if (bytes.byteLength !== payloadStart + payloadLength) {
+        throw new Error("远端音频帧长度不匹配");
+      }
+      const header = JSON.parse(decoder.decode(bytes.slice(headerStart, payloadStart)));
+      const payload = bytes.slice(payloadStart);
+      return { header: header, payload: payload };
+    }
+
+    function playPcmFrame(frame) {
+      const context = ensureAudioContext();
+      if (context.state === "suspended") {
+        latencyStatsEl.textContent = "浏览器暂停了音频播放，点击页面后重试，或点击开始发送。";
+        state.droppedFrames += 1;
+        renderLatencyStats();
+        return;
+      }
+      const channelCount = frame.header.channels || 1;
+      const bytesPerSample = Math.ceil((frame.header.bitDepth || 16) / 8);
+      const samplesPerChannel = Math.floor(frame.payload.byteLength / bytesPerSample / channelCount);
+      if (samplesPerChannel <= 0) {
+        state.droppedFrames += 1;
+        renderLatencyStats();
+        return;
+      }
+      const buffer = context.createBuffer(channelCount, samplesPerChannel, frame.header.sampleRate);
+      const view = new DataView(frame.payload.buffer, frame.payload.byteOffset, frame.payload.byteLength);
+      for (let frameIndex = 0; frameIndex < samplesPerChannel; frameIndex += 1) {
+        for (let channel = 0; channel < channelCount; channel += 1) {
+          const byteOffset = (frameIndex * channelCount + channel) * bytesPerSample;
+          const sample = readPcmSample(view, byteOffset, frame.header.bitDepth || 16);
+          buffer.getChannelData(channel)[frameIndex] = sample;
+        }
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(playbackGainForUser(frame.header.userId));
+      rememberPlayingSource(frame.header.userId, source);
+      source.onended = function () {
+        forgetPlayingSource(frame.header.userId, source);
+      };
+      const leadSeconds = playbackBufferMs() / 1000;
+      const minLeadSeconds = Math.min(playbackMinLeadSeconds, leadSeconds);
+      const next = state.nextPlaybackTimeByUser.get(frame.header.userId) || context.currentTime + leadSeconds;
+      const startAt = Math.max(context.currentTime + minLeadSeconds, next);
+      source.start(startAt);
+      state.nextPlaybackTimeByUser.set(frame.header.userId, startAt + buffer.duration);
+      state.playedFrames += 1;
+      updateLatency(frame.header.userId, frame.header.timestamp, Math.max(0, startAt - context.currentTime) * 1000);
+    }
+
+    function encodePcmInterleaved(left, right, format) {
+      const length = Math.min(left.length, right.length);
+      const bytesPerSample = Math.ceil(format.bitDepth / 8);
+      const output = new Uint8Array(length * format.channels * bytesPerSample);
+      const view = new DataView(output.buffer);
+      for (let i = 0; i < length; i += 1) {
+        const channelValues = [left[i] || 0, right[i] || left[i] || 0];
+        for (let channel = 0; channel < format.channels; channel += 1) {
+          writePcmSample(view, (i * format.channels + channel) * bytesPerSample, channelValues[channel] || channelValues[0], format.bitDepth);
+        }
+      }
+      return output;
+    }
+
+    function writePcmSample(view, byteOffset, value, bitDepth) {
+      const sample = Math.max(-1, Math.min(1, value || 0));
+      if (bitDepth === 16) {
+        view.setInt16(byteOffset, Math.round(sample * 32767), true);
+        return;
+      }
+      const intValue = Math.max(-8388608, Math.min(8388607, Math.round(sample * 8388607)));
+      view.setUint8(byteOffset, intValue & 255);
+      view.setUint8(byteOffset + 1, (intValue >> 8) & 255);
+      view.setUint8(byteOffset + 2, (intValue >> 16) & 255);
+    }
+
+    function readPcmSample(view, byteOffset, bitDepth) {
+      if (bitDepth === 24) {
+        let value = view.getUint8(byteOffset) | (view.getUint8(byteOffset + 1) << 8) | (view.getUint8(byteOffset + 2) << 16);
+        if (value & 0x800000) {
+          value |= ~0xffffff;
+        }
+        return Math.max(-1, Math.min(1, value / 8388608));
+      }
+      if (bitDepth === 32) {
+        return Math.max(-1, Math.min(1, view.getInt32(byteOffset, true) / 2147483648));
+      }
+      return view.getInt16(byteOffset, true) / 32768;
+    }
+
+    function updateInputMeter(left, right) {
+      let peak = 0;
+      const length = Math.min(left.length, right.length);
+      for (let i = 0; i < length; i += 1) {
+        peak = Math.max(peak, Math.abs(left[i] || 0), Math.abs(right[i] || 0));
+      }
+      inputMeter.style.width = Math.min(100, Math.round(peak * 140)) + "%";
+    }
+
+    function muteKeysForMember(member) {
+      return [member.userId, member.username, member.streamId].filter(Boolean).map(String);
+    }
+
+    function isMutedMember(member) {
+      return muteKeysForMember(member).some(function (key) { return state.mutedKeys.has(key); });
+    }
+
+    function isMutedFrame(frame) {
+      const member = state.members.get(frame.header.userId);
+      const keys = [frame.header.userId, frame.header.streamId, member && member.username, member && member.streamId].filter(Boolean).map(String);
+      return keys.some(function (key) { return state.mutedKeys.has(key); });
+    }
+
+    function toggleMute(member) {
+      const keys = muteKeysForMember(member);
+      const userId = member.userId;
+      if (isMutedMember(member)) {
+        for (const key of keys) {
+          state.mutedKeys.delete(key);
+        }
+        state.mutedUserIds.delete(userId);
+        setUserGain(userId, 1);
+        setStatus("已取消静音：" + (member.username || userId));
+      } else {
+        for (const key of keys) {
+          state.mutedKeys.add(key);
+        }
+        state.mutedUserIds.add(userId);
+        state.nextPlaybackTimeByUser.delete(userId);
+        setUserGain(userId, 0);
+        stopPlayingSources(userId);
+        setStatus("已静音：" + (member.username || userId));
+      }
+      renderMembers();
+    }
+
+    function toggleMuteFromButton(button) {
+      const member = {
+        userId: button.getAttribute("data-mute-user-id") || button.getAttribute("data-user-id") || "",
+        username: button.getAttribute("data-mute-username") || button.getAttribute("data-username") || "",
+        streamId: button.getAttribute("data-mute-stream-id") || button.getAttribute("data-stream-id") || ""
+      };
+      if (!member.userId) {
+        return;
+      }
+      const now = Date.now();
+      const last = state.lastMuteToggleAtByKey.get(member.userId) || 0;
+      if (now - last < 300) {
+        return;
+      }
+      state.lastMuteToggleAtByKey.set(member.userId, now);
+      toggleMute(member);
+    }
+
+    function findMuteButton(target) {
+      let node = target;
+      while (node && node !== membersEl) {
+        if (node.tagName === "BUTTON" && node.getAttribute("data-mute-user-id")) {
+          return node;
+        }
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    function playbackGainForUser(userId) {
+      let gain = state.playbackGainsByUser.get(userId);
+      if (!gain) {
+        gain = ensureAudioContext().createGain();
+        const member = state.members.get(userId);
+        gain.gain.value = member && isMutedMember(member) ? 0 : 1;
+        gain.connect(ensureAudioContext().destination);
+        state.playbackGainsByUser.set(userId, gain);
+      }
+      return gain;
+    }
+
+    function setUserGain(userId, value) {
+      const gain = playbackGainForUser(userId);
+      const context = ensureAudioContext();
+      gain.gain.cancelScheduledValues(context.currentTime);
+      gain.gain.setValueAtTime(value, context.currentTime);
+    }
+
+    function rememberPlayingSource(userId, source) {
+      let sources = state.playingSourcesByUser.get(userId);
+      if (!sources) {
+        sources = new Set();
+        state.playingSourcesByUser.set(userId, sources);
+      }
+      sources.add(source);
+    }
+
+    function forgetPlayingSource(userId, source) {
+      const sources = state.playingSourcesByUser.get(userId);
+      if (!sources) {
+        return;
+      }
+      sources.delete(source);
+      if (!sources.size) {
+        state.playingSourcesByUser.delete(userId);
+      }
+    }
+
+    function stopPlayingSources(userId) {
+      const sources = state.playingSourcesByUser.get(userId);
+      if (!sources) {
+        return;
+      }
+      for (const source of Array.from(sources)) {
+        try {
+          source.stop();
+        } catch {}
+        source.disconnect();
+      }
+      state.playingSourcesByUser.delete(userId);
+    }
+
+    function playbackBufferMs() {
+      return Math.max(5, Math.min(200, Number(playbackBufferMsInput.value || 25)));
+    }
+
+    function sendBlockSize() {
+      const value = Number(sendLatencySelect.value || 512);
+      return [256, 512, 1024, 2048, 4096].includes(value) ? value : 512;
+    }
+
+    function currentFormat() {
+      const parts = String(qualitySelect.value || "48000-24-2").split("-").map(Number);
+      return {
+        sampleRate: parts[0] || defaultFormat.sampleRate,
+        bitDepth: parts[1] === 16 ? 16 : 24,
+        channels: parts[2] === 1 ? 1 : 2
+      };
+    }
+
+    function updateQualitySummary() {
+      const format = currentFormat();
+      qualitySummary.textContent = "采样率 " + format.sampleRate + "Hz，" + format.bitDepth + "bit，" + (format.channels === 2 ? "双声道" : "单声道") + "，发送 " + sendBlockSize() + " samples。浏览器需要允许麦克风权限。";
+    }
+
+    function updateLatency(userId, sentAt, scheduledMs) {
+      const networkMs = Number.isFinite(sentAt) ? Date.now() - sentAt : NaN;
+      const usableNetworkMs = networkMs >= -1000 && networkMs < 10000 ? Math.max(0, networkMs) : NaN;
+      state.latencyByUser.set(userId, {
+        networkMs: usableNetworkMs,
+        scheduledMs: Math.max(0, Math.round(scheduledMs || 0)),
+        totalMs: Number.isFinite(usableNetworkMs) ? Math.max(0, Math.round(usableNetworkMs + (scheduledMs || 0))) : undefined,
+        updatedAt: Date.now()
+      });
+      renderLatencyStats();
+    }
+
+    function renderLatencyStats() {
+      const rows = [];
+      for (const [userId, latency] of state.latencyByUser.entries()) {
+        if (Date.now() - latency.updatedAt > 5000) {
+          continue;
+        }
+        const member = state.members.get(userId);
+        const name = member ? member.username : userId.slice(0, 8);
+        const network = Number.isFinite(latency.networkMs) ? Math.round(latency.networkMs) + "ms" : "时钟不同步";
+        const total = latency.totalMs === undefined ? "未知" : latency.totalMs + "ms";
+        rows.push(name + "：估算 " + total + "，网络/处理 " + network + "，播放缓冲 " + latency.scheduledMs + "ms");
+      }
+      const counters = "收到 " + state.receivedFrames + "，播放 " + state.playedFrames + "，静音丢弃 " + state.mutedFrames + "，未播放 " + state.droppedFrames;
+      latencyStatsEl.textContent = rows.length ? rows.join("；") + "。" + counters : "未收到远端音频。" + counters;
+    }
+
+    function renderMembers() {
+      const members = Array.from(state.members.values());
+      if (!members.length) {
+        membersEl.innerHTML = '<div class="empty">没有在线成员。</div>';
+        return;
+      }
+      membersEl.innerHTML = "";
+      for (const member of members) {
+        const row = document.createElement("div");
+        row.className = "member";
+        const info = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = member.username || member.userId;
+        const details = document.createElement("small");
+        details.textContent = member.format
+          ? member.format.sampleRate + "Hz / " + member.format.bitDepth + "bit / " + member.format.channels + "ch"
+          : (member.userId && String(member.userId).startsWith("sonobus-") ? "等待原生客户端音频" : "已加入，未开麦");
+        info.appendChild(name);
+        info.appendChild(details);
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        const isMe = state.user && member.userId === state.user.id;
+        badge.textContent = isMe ? "我" : "远端";
+        row.appendChild(info);
+        row.appendChild(badge);
+        if (!isMe) {
+          const muted = isMutedMember(member);
+          const muteButton = document.createElement("button");
+          muteButton.type = "button";
+          muteButton.textContent = muted ? "取消静音" : "静音";
+          muteButton.className = muted ? "active" : "";
+          muteButton.setAttribute("data-mute-user-id", member.userId || "");
+          muteButton.setAttribute("data-user-id", member.userId || "");
+          muteButton.setAttribute("data-mute-username", member.username || "");
+          muteButton.setAttribute("data-username", member.username || "");
+          muteButton.setAttribute("data-mute-stream-id", member.streamId || "");
+          muteButton.setAttribute("data-stream-id", member.streamId || "");
+          muteButton.onclick = function () { toggleMuteFromButton(muteButton); };
+          muteButton.addEventListener("pointerup", function () { toggleMuteFromButton(muteButton); });
+          muteButton.addEventListener("mouseup", function () { toggleMuteFromButton(muteButton); });
+          muteButton.addEventListener("touchend", function () { toggleMuteFromButton(muteButton); });
+          row.appendChild(muteButton);
+        }
+        membersEl.appendChild(row);
+      }
+    }
+
+    function writeAscii(view, offset, value) {
+      for (let i = 0; i < value.length; i += 1) {
+        view.setUint8(offset + i, value.charCodeAt(i));
+      }
+    }
+
+    function readAscii(view, offset, length) {
+      let value = "";
+      for (let i = 0; i < length; i += 1) {
+        value += String.fromCharCode(view.getUint8(offset + i));
+      }
+      return value;
+    }
+
+    function setStatus(text) {
+      statusEl.className = "status";
+      statusEl.textContent = text;
+    }
+
+    function showError(error) {
+      statusEl.className = "status error";
+      statusEl.textContent = error instanceof Error ? error.message : String(error);
+    }
+  </script>
+</body>
+</html>`;
 
 const adminPageHtml = String.raw`<!doctype html>
 <html lang="zh-CN">
