@@ -6,6 +6,8 @@ on:
     branches:
       - main
       - master
+    tags:
+      - "v*"
     paths:
       - ".github/workflows/build-windows.yml"
       - "sonobus/**"
@@ -14,6 +16,9 @@ on:
       - "LICENSE"
       - "LICENSE_EXCEPTION"
       - "NOTICE.md"
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -66,14 +71,25 @@ jobs:
             /DSBASIOSUFFIX="" `
             tools/windows-installer/sonobus-installer.iss
 
+      - name: Package portable zip
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/windows-x64/* -DestinationPath sonobus-windows-x64.zip -Force
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sonobus-windows-x64
-          path: artifacts/windows-x64
+          path: sonobus-windows-x64.zip
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: sonobus-windows-x64-installer
           path: installer-output/*.exe
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:GITHUB_REF_NAME sonobus-windows-x64.zip (Get-ChildItem installer-output/*.exe).FullName --clobber
